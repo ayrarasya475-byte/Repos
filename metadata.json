@@ -1,0 +1,6 @@
+{
+  "name": "RepostNow",
+  "description": "Upload files and entire folders to GitHub repositories directly from your browser. Create new repositories or update existing ones with a sleek, interactive workspace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
