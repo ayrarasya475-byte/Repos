@@ -282,7 +282,8 @@ export async function fetchRepoContents(
   path: string = '',
   ref: string = 'main'
 ): Promise<any> {
-  const cleanPath = path ? `/${path}` : '';
+  const encodedPath = path ? path.split('/').map(encodeURIComponent).join('/') : '';
+  const cleanPath = encodedPath ? `/${encodedPath}` : '';
   const query = ref ? `?ref=${ref}` : '';
   return githubFetch(`/repos/${owner}/${repo}/contents${cleanPath}${query}`, { token });
 }
@@ -315,7 +316,8 @@ export async function deleteFileFromRepo(
     sha,
     branch,
   };
-  return githubFetch(`/repos/${owner}/${repo}/contents/${path}`, {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return githubFetch(`/repos/${owner}/${repo}/contents/${encodedPath}`, {
     token,
     method: 'DELETE',
     body,
@@ -343,7 +345,8 @@ export async function uploadSingleFileToRepo(
   if (sha) {
     body.sha = sha;
   }
-  return githubFetch(`/repos/${owner}/${repo}/contents/${path}`, {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return githubFetch(`/repos/${owner}/${repo}/contents/${encodedPath}`, {
     token,
     method: 'PUT',
     body,

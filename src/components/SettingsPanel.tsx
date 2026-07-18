@@ -233,7 +233,14 @@ export default function SettingsPanel({
         );
       }
       setDeletingFile(null);
-      handleBrowseRepo(selectedRepo, currentPath);
+      
+      // Optimistic update: filter out the deleted item from local state instantly
+      setRepoContents(prev => prev.filter(c => c.path !== item.path));
+
+      // Wait 1 second before doing the real GitHub refresh to let GitHub's eventual consistency settle
+      setTimeout(() => {
+        handleBrowseRepo(selectedRepo, currentPath);
+      }, 1000);
     } catch (err: any) {
       alert(`Failed to delete item: ${err.message}`);
     } finally {
