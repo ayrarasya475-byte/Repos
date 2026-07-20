@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, Key, FolderGit, Search, Trash2, X, Download, Upload, Eye, ChevronLeft,
   ChevronRight, Folder, File, HelpCircle, Loader2, Sparkles, CheckCircle, RefreshCw, AlertTriangle, Github,
-  Globe, ShieldAlert, ArrowRight, LayoutGrid, Cpu, Sliders, Play, Terminal
+  Globe, ShieldAlert, ArrowRight, LayoutGrid, Cpu, Sliders, Play, Terminal, Edit2
 } from 'lucide-react';
 import { GitHubUser, GitHubRepo, UploadFile } from '../types';
 import {
@@ -81,6 +81,11 @@ export default function SettingsPanel({
 
   // Preview file modal state
   const [previewFile, setPreviewFile] = useState<any | null>(null);
+
+  // Repository inline file editor states
+  const [editingRepoFile, setEditingRepoFile] = useState<any | null>(null);
+  const [editingRepoFileContent, setEditingRepoFileContent] = useState<string>('');
+  const [savingRepoFile, setSavingRepoFile] = useState<boolean>(false);
 
   // Manual Zip Deployment state
   const [deployZipFile, setDeployZipFile] = useState<File | null>(null);
@@ -245,6 +250,52 @@ export default function SettingsPanel({
       alert(`Failed to delete item: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Start repository file inline editing
+  const handleStartEditRepoFile = async (item: any) => {
+    setLoading(true);
+    try {
+      const response = await fetch(item.download_url);
+      if (!response.ok) throw new Error('Failed to retrieve file source.');
+      const text = await response.text();
+      setEditingRepoFile(item);
+      setEditingRepoFileContent(text);
+    } catch (err: any) {
+      alert(`Failed to load file content: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Save the repository file inline edit
+  const handleSaveRepoFile = async () => {
+    if (!selectedRepo || !editingRepoFile) return;
+    setSavingRepoFile(true);
+    try {
+      const base64Content = btoa(unescape(encodeURIComponent(editingRepoFileContent)));
+      await uploadSingleFileToRepo(
+        token,
+        selectedRepo.owner?.login || '',
+        selectedRepo.name,
+        editingRepoFile.path,
+        base64Content,
+        selectedRepo.default_branch || 'main',
+        `Update ${editingRepoFile.name} via RepostNow Editor`,
+        editingRepoFile.sha
+      );
+
+      alert(`File "${editingRepoFile.name}" has been updated successfully on GitHub!`);
+      setEditingRepoFile(null);
+      // Settle and reload contents
+      setTimeout(() => {
+        handleBrowseRepo(selectedRepo, currentPath);
+      }, 1000);
+    } catch (err: any) {
+      alert(`Failed to save file: ${err.message}`);
+    } finally {
+      setSavingRepoFile(false);
     }
   };
 
@@ -588,56 +639,185 @@ export default function SettingsPanel({
     repo.name.toLowerCase().includes(repoSearch.toLowerCase()) ||
     (repo.description || '').toLowerCase().includes(repoSearch.toLowerCase())
   );
-
   return (
     <AnimatePresence>
       {isOpen && (
-        <div id="settings-modal" className="fixed inset-0 z-50 flex justify-start">
+        <div id="settings-modal" className="fixed inset-0 z-50 flex justify-center items-center p-4 sm:p-6 md:p-10">
           {/* Blur Overlay Mask */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="absolute inset-0 bg-[#050508]/90 backdrop-blur-md"
+            className="absolute inset-0 bg-[#040406]/92 backdrop-blur-md"
           />
 
-          {/* Drawer Panel Container */}
+          {/* Center-Aligned Split Pane Window Container */}
           <motion.div
-            initial={{ x: '-100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '-100%' }}
-            transition={{ type: 'spring', damping: 24, stiffness: 210 }}
-            className="relative w-full max-w-xl md:max-w-2xl h-full bg-[#0E0E11] border-r border-white/5 flex flex-col shadow-[25px_0_60px_-15px_rgba(0,0,0,0.8)] overflow-hidden z-10 font-sans"
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+            className="relative w-full max-w-5xl xl:max-w-6xl h-[90vh] md:h-[85vh] bg-[#08080A] border border-white/10 rounded-2xl flex flex-col md:flex-row shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] overflow-hidden z-10 font-sans"
           >
-            {/* Elegant Header */}
-            <div className="p-6 border-b border-white/5 bg-[#0A0A0C]/90 flex items-center justify-between">
-              <div className="flex items-center gap-3.5">
-                <div className="p-3 bg-indigo-500/10 rounded-2xl text-indigo-400 border border-indigo-500/10 shadow-lg shadow-indigo-500/5">
+            {/* Left Sidebar Menu Side Pane */}
+            <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-white/5 bg-[#09090C] flex flex-col p-4 md:p-5 flex-shrink-0">
+              {/* Sidebar Header / Logo */}
+              <div className="hidden md:flex items-center gap-3 mb-6 border-b border-white/5 pb-5">
+                <div className="p-2.5 bg-indigo-500/10 rounded-xl text-indigo-400 border border-indigo-500/10 shadow-lg shadow-indigo-500/5 flex items-center justify-center">
                   <Sliders className="w-5 h-5 animate-pulse" />
                 </div>
-                <div>
-                  <h2 className="text-xl font-bold text-slate-100 tracking-tight">Workspace Control Center</h2>
-                  <p className="text-xs text-slate-400">Deploy applications, configure APIs, and audit Git resources</p>
+                <div className="text-left">
+                  <h2 className="text-sm font-bold text-slate-100 tracking-tight">Control Center</h2>
+                  <p className="text-[10px] text-indigo-400 font-mono tracking-wider">REPOSTNOW v1.2.0</p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl transition duration-150 border border-white/5 active:scale-95"
-              >
-                <X className="w-5 h-5" />
-              </button>
+
+              {/* Sidebar Navigation Options */}
+              <div className="flex flex-row md:flex-col overflow-x-auto md:overflow-x-visible md:space-y-1 gap-2 md:gap-0 flex-grow pr-1 pb-1 md:pb-0 scrollbar-none">
+                <span className="hidden md:block text-[9px] font-mono text-slate-500 uppercase tracking-widest font-bold px-3 mb-2">WORKSPACE PANELS</span>
+                
+                <button
+                  onClick={() => setScreen('home')}
+                  className={`flex items-center gap-2 px-3 py-2 md:py-2.5 rounded-xl text-xs font-semibold transition text-left flex-shrink-0 md:flex-shrink-0 ${screen === 'home' ? 'bg-white/5 text-white border border-white/5 shadow-inner' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+                >
+                  <LayoutGrid className="w-4 h-4 text-indigo-400" />
+                  <span>Overview</span>
+                </button>
+
+                <button
+                  onClick={() => setScreen('auth')}
+                  className={`flex items-center gap-2 px-3 py-2 md:py-2.5 rounded-xl text-xs font-semibold transition text-left flex-shrink-0 md:flex-shrink-0 ${screen === 'auth' ? 'bg-white/5 text-white border border-white/5 shadow-inner' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+                >
+                  <Key className="w-4 h-4 text-amber-400" />
+                  <span>Credentials</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (!user) {
+                      alert('Please connect your GitHub account first.');
+                      setScreen('auth');
+                      return;
+                    }
+                    setScreen('repos');
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 md:py-2.5 rounded-xl text-xs font-semibold transition text-left flex-shrink-0 md:flex-shrink-0 ${screen === 'repos' || screen === 'repo-detail' ? 'bg-white/5 text-white border border-white/5 shadow-inner' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+                >
+                  <FolderGit className="w-4 h-4 text-emerald-400" />
+                  <span>Repo Browser</span>
+                </button>
+
+                {user && (
+                  <button
+                    onClick={() => setScreen('profile')}
+                    className={`flex items-center gap-2 px-3 py-2 md:py-2.5 rounded-xl text-xs font-semibold transition text-left flex-shrink-0 md:flex-shrink-0 ${screen === 'profile' ? 'bg-white/5 text-white border border-white/5 shadow-inner' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+                  >
+                    <Github className="w-4 h-4 text-purple-400" />
+                    <span>Profile</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setScreen('deploy')}
+                  className={`flex items-center gap-2 px-3 py-2 md:py-2.5 rounded-xl text-xs font-semibold transition text-left flex-shrink-0 md:flex-shrink-0 ${screen === 'deploy' ? 'bg-white/5 text-white border border-white/5 shadow-inner' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+                >
+                  <Globe className="w-4 h-4 text-teal-400" />
+                  <span>Vercel Deploy</span>
+                </button>
+              </div>
+
+              {/* Sidebar Footer with connected user details */}
+              <div className="hidden md:block pt-4 border-t border-white/5">
+                {user ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2.5 px-2">
+                      <img src={user.avatar_url} alt={user.login} className="w-8 h-8 rounded-full border border-indigo-500/20 shadow" />
+                      <div className="text-left truncate">
+                        <p className="text-xs font-bold text-slate-200 truncate">{user.name || user.login}</p>
+                        <p className="text-[10px] text-indigo-400 font-mono truncate">@{user.login}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={onDisconnect}
+                      className="w-full py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/10 rounded-xl text-[10px] font-bold transition"
+                    >
+                      Disconnect Account
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-center space-y-2">
+                    <p className="text-[10px] text-slate-500 font-mono">No connected account</p>
+                    <button
+                      onClick={() => setScreen('auth')}
+                      className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-bold transition"
+                    >
+                      Authenticate Now
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* MAIN PANEL SCROLL CONTAINER */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-[#0E0E11]">
-              
-              {/* --- SCREEN 1: HOME PANEL --- */}
-              {screen === 'home' && (
-                <div className="space-y-6">
-                  {/* Connected Status Card */}
-                  <div className="p-5 bg-gradient-to-tr from-indigo-950/20 to-indigo-900/10 border border-indigo-500/10 rounded-2xl flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3.5">
+            {/* Right Pane: Blurred / Frosty Glass Container */}
+            <div className="flex-grow flex flex-col bg-[#0E0E12] h-full overflow-hidden">
+              {/* Frosty Aligned Header */}
+              <div className="px-6 py-4 border-b border-white/5 bg-[#09090C]/80 backdrop-blur flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/5 border border-white/10 rounded-xl text-slate-300">
+                    {screen === 'home' && <LayoutGrid className="w-4 h-4 text-indigo-400" />}
+                    {screen === 'auth' && <Key className="w-4 h-4 text-amber-400" />}
+                    {(screen === 'repos' || screen === 'repo-detail') && <FolderGit className="w-4 h-4 text-emerald-400" />}
+                    {screen === 'profile' && <Github className="w-4 h-4 text-purple-400" />}
+                    {screen === 'deploy' && <Globe className="w-4 h-4 text-teal-400" />}
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-sm font-bold text-slate-100 tracking-tight uppercase tracking-wider font-mono">
+                      {screen === 'home' && 'OVERVIEW'}
+                      {screen === 'auth' && 'CREDENTIALS & SECURITY'}
+                      {screen === 'repos' && 'REPOSITORY BROWSER'}
+                      {screen === 'repo-detail' && 'FILE EXPLORER'}
+                      {screen === 'profile' && 'GITHUB PROFILE'}
+                      {screen === 'deploy' && 'VERCEL EDGE PIPELINE'}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                      {screen === 'home' && 'Manage Connected accounts, file systems, and hosting integrations'}
+                      {screen === 'auth' && 'Configure personal access tokens or secure SSO keys'}
+                      {screen === 'repos' && 'Audit and modify remote directories and repository assets'}
+                      {screen === 'repo-detail' && `Browsing files inside: ${selectedRepo?.full_name}`}
+                      {screen === 'profile' && 'Real-time statistics and credentials information'}
+                      {screen === 'deploy' && 'Host static websites or applications directly from memory'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {(screen === 'repo-detail' || screen === 'auth' || screen === 'profile' || screen === 'deploy') && (
+                    <button
+                      onClick={() => setScreen('home')}
+                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/5 rounded-xl text-[11px] font-semibold transition"
+                    >
+                      ← Overview
+                    </button>
+                  )}
+                  <button
+                    onClick={onClose}
+                    className="p-2 bg-white/5 hover:bg-rose-500/10 hover:text-rose-400 text-slate-400 rounded-xl transition border border-white/5 active:scale-95"
+                    title="Close"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Detail Content Area */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-[#0E0E12]/80">
+                {/* --- SCREEN 1: HOME PANEL --- */}
+                {screen === 'home' && (
+                  <div className="space-y-6">
+                    {/* Connected Status Card */}
+                    <div className="p-5 bg-gradient-to-tr from-indigo-950/20 to-indigo-900/10 border border-indigo-500/10 rounded-2xl flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3.5">
                       {user ? (
                         <img
                           src={user.avatar_url}
@@ -1150,6 +1330,13 @@ export default function SettingsPanel({
                                   >
                                     <Eye className="w-3.5 h-3.5" />
                                   </button>
+                                  <button
+                                    onClick={() => handleStartEditRepoFile(item)}
+                                    className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-white/5 rounded-lg transition"
+                                    title="Edit file inline"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
                                   <a
                                     href={item.download_url}
                                     download={item.name}
@@ -1542,12 +1729,93 @@ export default function SettingsPanel({
                 RepostNow Core v1.2.0 • Decentralized Sandbox Environment
               </p>
             </div>
-          </motion.div>
+          </div>
+        </motion.div>
 
           {/* Embedded File Previewer Modal */}
           {previewFile && (
             <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
           )}
+
+          {/* Embedded Repository Code Editor Modal */}
+          <AnimatePresence>
+            {editingRepoFile && (
+              <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setEditingRepoFile(null)}
+                  className="absolute inset-0 bg-black/85 backdrop-blur-sm"
+                />
+                <motion.div
+                  initial={{ scale: 0.95, y: 15, opacity: 0 }}
+                  animate={{ scale: 1, y: 0, opacity: 1 }}
+                  exit={{ scale: 0.95, y: 15, opacity: 0 }}
+                  className="relative w-full max-w-3xl h-[80vh] bg-[#0A0A0C] border border-white/10 rounded-2xl flex flex-col shadow-2xl z-10 overflow-hidden font-sans"
+                >
+                  {/* Editor Header */}
+                  <div className="p-4 bg-[#111115] border-b border-white/5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400 border border-amber-500/10">
+                        <Edit2 className="w-4 h-4" />
+                      </div>
+                      <div className="text-left">
+                        <h3 className="text-xs font-mono uppercase tracking-wider text-amber-500 font-bold">REPOSTNOW GITHUB EDITOR</h3>
+                        <p className="text-sm font-bold text-slate-100 font-mono truncate max-w-md">
+                          {editingRepoFile.path}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setEditingRepoFile(null)}
+                      className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Editor Body */}
+                  <div className="flex-1 p-4 bg-[#070709] flex flex-col min-h-0">
+                    <textarea
+                      value={editingRepoFileContent}
+                      onChange={(e) => setEditingRepoFileContent(e.target.value)}
+                      className="w-full flex-1 p-4 bg-[#0A0A0C] border border-white/5 rounded-xl font-mono text-xs text-slate-300 focus:outline-none focus:border-amber-500/30 resize-none overflow-y-auto leading-relaxed"
+                      placeholder="Write your code here..."
+                      spellCheck={false}
+                    />
+                  </div>
+
+                  {/* Editor Footer */}
+                  <div className="p-4 bg-[#111115] border-t border-white/5 flex items-center justify-end gap-3">
+                    <button
+                      onClick={() => setEditingRepoFile(null)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveRepoFile}
+                      disabled={savingRepoFile}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-amber-500/10"
+                    >
+                      {savingRepoFile ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Pushing to GitHub...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          <span>Commit & Push Changes</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
           {/* SECURE MATHEMATICAL CAPTCHA OVERLAY DIALOG */}
           <AnimatePresence>

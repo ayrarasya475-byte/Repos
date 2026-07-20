@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Github, FolderGit, FolderUp, RefreshCw, AlertCircle, Play, CheckCircle, Sliders } from 'lucide-react';
+import { Github, FolderGit, FolderUp, RefreshCw, AlertCircle, Play, CheckCircle, Sliders, Sparkles, TrendingUp, LayoutGrid } from 'lucide-react';
 
 import { GitHubUser, GitHubRepo, GitHubOrg, UploadFile, UploadSession } from './types';
 import { verifyToken, fetchUserRepos, fetchUserOrgs, createRepository, uploadFilesToGithub } from './utils/github';
@@ -13,6 +13,8 @@ import FolderDropzone from './components/FolderDropzone';
 import FileTree from './components/FileTree';
 import UploadProgressPanel from './components/UploadProgressPanel';
 import SettingsPanel from './components/SettingsPanel';
+import StatsDashboard from './components/StatsDashboard';
+import AiAssistantPanel from './components/AiAssistantPanel';
 
 const STORAGE_KEY = 'repostnow_github_token';
 
@@ -22,6 +24,7 @@ export default function App() {
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [orgs, setOrgs] = useState<GitHubOrg[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'ai' | 'stats'>('dashboard');
 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -248,183 +251,288 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
   const isFormValid = !!(user && repoConfig && (repoConfig.mode === 'existing' ? !!repoConfig.selectedRepoFullName : !!repoConfig.name));
 
   return (
-    <div className="min-h-screen flex flex-col selection:bg-indigo-500/30 selection:text-indigo-300">
+    <div className="min-h-screen bg-[#070709] text-slate-100 flex flex-col md:flex-row selection:bg-indigo-500/30 selection:text-indigo-300 relative overflow-x-hidden">
       {/* Decorative Background Accents */}
-      <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none z-0" />
+      <div className="absolute bottom-10 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none z-0" />
 
-      {/* Primary Header */}
-      <header className="sticky top-0 z-40 bg-[#0E0E10]/85 backdrop-blur-md border-b border-white/5 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-              className={`flex items-center justify-center p-3 rounded-xl border transition duration-200 shadow-md ${
-                isSettingsOpen
-                  ? 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500/50'
-                  : 'bg-[#141417] hover:bg-[#1c1c21] text-slate-200 hover:text-slate-100 border-white/5'
-              }`}
-              title="Open Settings & Workspace Control Center"
-            >
-              <Sliders className="w-5 h-5 text-indigo-400" />
-            </button>
-            
-            <div className="hidden sm:flex items-center gap-3 border-l border-white/5 pl-4">
-              <div className="p-2 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-xl shadow-lg shadow-indigo-500/10 flex items-center justify-center">
-                <FolderGit className="w-5 h-5 text-white font-bold" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold tracking-tight text-slate-100 font-sans">RepostNow</h1>
-                  <span className="px-2 py-0.5 rounded-full bg-[#0A0A0B] border border-white/5 text-slate-400 text-[10px] font-mono">v1.1.0</span>
-                </div>
-                <p className="text-[11px] text-slate-400">Direct-to-GitHub Repository Upload Engine</p>
-              </div>
+      {/* DESKTOP SIDEBAR NAVIGATION RAIL */}
+      <aside className="hidden md:flex w-64 border-r border-white/5 bg-[#09090C] flex-col p-5 flex-shrink-0 z-30 sticky top-0 h-screen justify-between">
+        <div className="space-y-6">
+          {/* Logo */}
+          <div className="flex items-center gap-3 border-b border-white/5 pb-5">
+            <div className="p-2.5 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-xl shadow-lg shadow-indigo-500/10 flex items-center justify-center">
+              <FolderGit className="w-5 h-5 text-white" />
+            </div>
+            <div className="text-left">
+              <h1 className="text-sm font-extrabold text-white tracking-tight font-sans">RepostNow</h1>
+              <p className="text-[10px] text-indigo-400 font-mono tracking-wider">CODE ENGINE v1.2.0</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {user && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-[#141417] border border-white/5 rounded-xl text-xs font-mono text-slate-300">
-                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                <span>@{user.login}</span>
-              </div>
-            )}
-            <a
-              href="https://github.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2.5 text-slate-400 hover:text-slate-100 hover:bg-[#141417] rounded-xl transition duration-150 border border-transparent hover:border-white/5"
-              title="Visit GitHub"
+          {/* Navigation Links */}
+          <div className="space-y-1">
+            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest font-bold px-3 block mb-2">Workspace Modules</span>
+            
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'dashboard' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
             >
-              <Github className="w-5 h-5" />
-            </a>
+              <LayoutGrid className="w-4 h-4" />
+              <span>Dashboard Workspace</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('ai')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'ai' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>AI Coding Assistant</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('stats')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'stats' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+            >
+              <TrendingUp className="w-4 h-4" />
+              <span>Analytics & Stats</span>
+            </button>
           </div>
+        </div>
+
+        {/* Bottom Sidebar Action & Profile */}
+        <div className="space-y-4 pt-4 border-t border-white/5">
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white transition border border-transparent text-left"
+          >
+            <Sliders className="w-4 h-4 text-slate-400" />
+            <span>Workspace Settings</span>
+          </button>
+
+          {user && (
+            <div className="flex items-center gap-2.5 px-3 py-2 bg-[#121215] border border-white/5 rounded-xl text-xs font-mono text-slate-300">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0" />
+              <span className="truncate">@{user.login}</span>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* MOBILE HEADER */}
+      <header className="md:hidden sticky top-0 z-40 bg-[#0E0E10]/90 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between w-full">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-lg shadow flex items-center justify-center">
+            <FolderGit className="w-4 h-4 text-white" />
+          </div>
+          <span className="text-sm font-extrabold text-white">RepostNow</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-1.5 text-slate-400 hover:text-white bg-white/5 rounded-lg border border-white/5"
+            title="Open settings"
+          >
+            <Sliders className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
-      {/* Main Workspace Stage */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 md:py-8 space-y-6">
-        <AnimatePresence mode="wait">
-          {session.status !== 'idle' ? (
-            /* Upload Session active: focus completely on Progress logs and terminal */
-            <motion.div
-              key="progress-panel"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              className="max-w-2xl mx-auto"
-            >
-              <UploadProgressPanel
-                session={session}
-                owner={repoConfig?.mode === 'create' ? repoConfig?.owner || '' : repoConfig?.selectedRepoFullName.split('/')[0] || ''}
-                repoName={repoConfig?.mode === 'create' ? repoConfig?.name || '' : repoConfig?.selectedRepoFullName.split('/')[1] || ''}
-                branch={repoConfig?.branch || 'main'}
-                onReset={handleResetSession}
-              />
-            </motion.div>
-          ) : (
-            /* Main setup workspace dashboard */
-            <motion.div
-              key="setup-dashboard"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="grid grid-cols-1 lg:grid-cols-12 gap-6"
-            >
-              {/* Left Column: Accounts & Repo Configuration */}
-              <div className="lg:col-span-5 space-y-6">
-                {/* 1. Account / Token input */}
-                <TokenInput
-                  token={token}
-                  user={user}
-                  loading={loading}
-                  error={error}
-                  onConnect={handleConnectToken}
-                  onDisconnect={handleDisconnect}
+      {/* MAIN CONTAINER */}
+      <div className="flex-grow flex flex-col min-h-screen min-w-0 z-10 pb-20 md:pb-0">
+        <main className="flex-grow p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          <AnimatePresence mode="wait">
+            {session.status !== 'idle' ? (
+              <motion.div
+                key="progress-panel"
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                className="max-w-2xl mx-auto py-10"
+              >
+                <UploadProgressPanel
+                  session={session}
+                  owner={repoConfig?.mode === 'create' ? repoConfig?.owner || '' : repoConfig?.selectedRepoFullName.split('/')[0] || ''}
+                  repoName={repoConfig?.mode === 'create' ? repoConfig?.name || '' : repoConfig?.selectedRepoFullName.split('/')[1] || ''}
+                  branch={repoConfig?.branch || 'main'}
+                  onReset={handleResetSession}
                 />
-
-                {/* 2. Repository selection configuration */}
-                {user ? (
+              </motion.div>
+            ) : (
+              <div className="h-full">
+                {/* 1. DASHBOARD VIEW */}
+                {activeTab === 'dashboard' && (
                   <motion.div
+                    key="dashboard"
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    className="grid grid-cols-1 lg:grid-cols-12 gap-6"
                   >
-                    <RepoSelector
-                      repos={repos}
-                      orgs={orgs}
-                      username={user.login}
-                      loading={loading}
-                      onRepoConfigChange={setRepoConfig}
-                    />
-                  </motion.div>
-                ) : (
-                  <div className="bg-[#141417]/40 border border-white/5 rounded-2xl p-8 text-center text-slate-500 border-dashed">
-                    <Github className="w-8 h-8 mx-auto mb-3 opacity-30 text-indigo-400" />
-                    <p className="text-sm">Please connect your GitHub account using your Personal Access Token, or click Settings & Repos at the top left to authenticate with Firebase.</p>
-                  </div>
-                )}
-              </div>
+                    {/* Left Column: Accounts & Repo Configuration */}
+                    <div className="lg:col-span-5 space-y-6">
+                      <TokenInput
+                        token={token}
+                        user={user}
+                        loading={loading}
+                        error={error}
+                        onConnect={handleConnectToken}
+                        onDisconnect={handleDisconnect}
+                      />
 
-              {/* Right Column: Files upload & File tree */}
-              <div className="lg:col-span-7 space-y-6 flex flex-col h-full">
-                {/* Dropzone */}
-                <FolderDropzone
-                  onFilesSelected={handleFilesSelected}
-                  disabled={isUploading}
-                />
-
-                {/* Staged files explorer list */}
-                <FileTree
-                  files={files}
-                  onRemoveFile={handleRemoveFile}
-                  onClearAll={handleClearAll}
-                  disabled={isUploading}
-                />
-
-                {/* Master push action panel */}
-                {hasStagedFiles && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-5 bg-[#141417] border border-white/5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 mt-auto shadow-2xl"
-                  >
-                    <div className="text-left">
-                      <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Ready to push</p>
-                      <h4 className="font-bold text-slate-100 text-base">
-                        {files.length} {files.length === 1 ? 'file' : 'files'} staged for upload
-                      </h4>
-                      {repoConfig && (
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          Pushing to{' '}
-                          <strong className="text-indigo-400 font-mono font-medium">
-                            {repoConfig.mode === 'create'
-                              ? `${repoConfig.owner}/${repoConfig.name || '[Unnamed Repo]'}`
-                              : repoConfig.selectedRepoFullName}
-                          </strong>{' '}
-                          on branch <strong className="text-slate-300 font-mono font-medium">{repoConfig.branch}</strong>
-                        </p>
+                      {user ? (
+                        <motion.div
+                          initial={{ opacity: 0, y: 15 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.1 }}
+                        >
+                          <RepoSelector
+                            repos={repos}
+                            orgs={orgs}
+                            username={user.login}
+                            loading={loading}
+                            onRepoConfigChange={setRepoConfig}
+                          />
+                        </motion.div>
+                      ) : (
+                        <div className="bg-[#141417]/40 border border-white/5 rounded-2xl p-8 text-center text-slate-500 border-dashed">
+                          <Github className="w-8 h-8 mx-auto mb-3 opacity-30 text-indigo-400" />
+                          <p className="text-xs leading-normal">
+                            Please connect your GitHub account using your Personal Access Token, or open the settings sidebar to authenticate via secure popup integration.
+                          </p>
+                        </div>
                       )}
                     </div>
 
-                    <button
-                      onClick={handlePushRepository}
-                      disabled={!isFormValid || isUploading}
-                      className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-500/15 disabled:shadow-none transition duration-200"
-                    >
-                      <Play className="w-4 h-4 fill-current" />
-                      <span>Upload Repository</span>
-                    </button>
+                    {/* Right Column: Files Upload & Tree */}
+                    <div className="lg:col-span-7 space-y-6 flex flex-col h-full">
+                      <FolderDropzone
+                        onFilesSelected={handleFilesSelected}
+                        disabled={isUploading}
+                      />
+
+                      <FileTree
+                        files={files}
+                        onRemoveFile={handleRemoveFile}
+                        onClearAll={handleClearAll}
+                        disabled={isUploading}
+                      />
+
+                      {hasStagedFiles && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-5 bg-[#141417] border border-white/5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 mt-auto shadow-2xl"
+                        >
+                          <div className="text-left">
+                            <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Ready to push</p>
+                            <h4 className="font-bold text-slate-100 text-base">
+                              {files.length} {files.length === 1 ? 'file' : 'files'} staged for upload
+                            </h4>
+                            {repoConfig && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Pushing to{' '}
+                                <strong className="text-indigo-400 font-mono font-medium">
+                                  {repoConfig.mode === 'create'
+                                    ? `${repoConfig.owner}/${repoConfig.name || '[Unnamed Repo]'}`
+                                    : repoConfig.selectedRepoFullName}
+                                </strong>{' '}
+                                on branch <strong className="text-slate-300 font-mono font-medium">{repoConfig.branch}</strong>
+                              </p>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={handlePushRepository}
+                            disabled={!isFormValid || isUploading}
+                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-500/15 disabled:shadow-none transition duration-200"
+                          >
+                            <Play className="w-4 h-4 fill-current" />
+                            <span>Upload Repository</span>
+                          </button>
+                        </motion.div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* 2. AI CODING ASSISTANT VIEW */}
+                {activeTab === 'ai' && (
+                  <motion.div
+                    key="ai-assistant"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    className="h-[82vh] md:h-[86vh] flex flex-col shadow-2xl"
+                  >
+                    <AiAssistantPanel
+                      stagedFiles={files}
+                      onUpdateStagedFiles={setFiles}
+                    />
+                  </motion.div>
+                )}
+
+                {/* 3. STATISTICS & METRICS VIEW */}
+                {activeTab === 'stats' && (
+                  <motion.div
+                    key="statistics"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    className="space-y-6"
+                  >
+                    <StatsDashboard
+                      stagedFiles={files}
+                    />
                   </motion.div>
                 )}
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
+            )}
+          </AnimatePresence>
+        </main>
 
-      {/* Settings Dialog Overlay */}
+        {/* Global Desktop Footer */}
+        <footer className="hidden md:block py-6 text-center text-slate-600 text-xs border-t border-white/5 bg-[#08080A]">
+          <p>© 2026 RepostNow. Direct Browser GitHub Pipeline. No logs. No trackers.</p>
+        </footer>
+      </div>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0E0E10]/90 backdrop-blur-md border-t border-white/5 px-4 py-2 flex items-center justify-around shadow-2xl">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'dashboard' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
+        >
+          <LayoutGrid className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-mono">Home</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('ai')}
+          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'ai' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
+        >
+          <Sparkles className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-mono">AI Code</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('stats')}
+          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'stats' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
+        >
+          <TrendingUp className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-mono">Stats</span>
+        </button>
+
+        <button
+          onClick={() => setIsSettingsOpen(true)}
+          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition text-slate-400`}
+        >
+          <Sliders className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-mono">Settings</span>
+        </button>
+      </nav>
+
+      {/* Workspace Control Center split-pane drawer/dialog overlay */}
       <SettingsPanel
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -436,11 +544,6 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
         onDisconnect={handleDisconnect}
         onRefreshRepos={handleRefreshRepos}
       />
-
-      {/* Simple Footer */}
-      <footer className="mt-auto border-t border-slate-900 bg-slate-950/60 py-6 text-center text-slate-500 text-xs">
-        <p>© 2026 RepostNow. Built securely in the browser. Zero server logs.</p>
-      </footer>
     </div>
   );
 }

@@ -32,18 +32,45 @@ export async function extractZipFile(zipUploadFile: UploadFile): Promise<UploadF
     const loadedZip = await zip.loadAsync(zipUploadFile.file);
     const promises: Promise<void>[] = [];
 
+    // Gather all active file entries
+    const fileEntries: { relativePath: string; zipEntry: any }[] = [];
     loadedZip.forEach((relativePath, zipEntry) => {
-      if (zipEntry.dir) return;
+      if (!zipEntry.dir) {
+        fileEntries.push({ relativePath, zipEntry });
+      }
+    });
 
+    // Determine if there is a common top-level directory wrapping all files
+    let commonPrefix = '';
+    if (fileEntries.length > 0) {
+      // Split the first path by '/' to find the first folder name
+      const firstPath = fileEntries[0].relativePath;
+      const firstSlashIdx = firstPath.indexOf('/');
+      if (firstSlashIdx !== -1) {
+        const potentialPrefix = firstPath.substring(0, firstSlashIdx + 1); // e.g. "my-folder/"
+        const allSharePrefix = fileEntries.every(entry => entry.relativePath.startsWith(potentialPrefix));
+        if (allSharePrefix) {
+          commonPrefix = potentialPrefix;
+        }
+      }
+    }
+
+    fileEntries.forEach(({ relativePath, zipEntry }) => {
       const promise = zipEntry.async('blob').then((blob) => {
         const fileObject = new File([blob], zipEntry.name, {
           type: mimeTypeFromName(zipEntry.name),
         });
 
+        // Strip the common prefix folder if it exists
+        let cleanPath = relativePath;
+        if (commonPrefix && relativePath.startsWith(commonPrefix)) {
+          cleanPath = relativePath.substring(commonPrefix.length);
+        }
+
         extractedFiles.push({
           id: crypto.randomUUID(),
           name: fileObject.name,
-          path: relativePath,
+          path: cleanPath,
           size: fileObject.size,
           type: fileObject.type,
           file: fileObject,

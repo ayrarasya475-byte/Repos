@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileCode, Search, Trash2, X, ShieldAlert, CheckCircle, RefreshCw, Eye } from 'lucide-react';
+import { FileCode, Search, Trash2, X, ShieldAlert, CheckCircle, RefreshCw, Eye, Edit2 } from 'lucide-react';
 import { UploadFile } from '../types';
 import FilePreviewModal from './FilePreviewModal';
 
@@ -8,6 +8,7 @@ interface FileTreeProps {
   onRemoveFile: (id: string) => void;
   onClearAll: () => void;
   disabled: boolean;
+  onEditFile?: (file: UploadFile) => void;
 }
 
 export function formatBytes(bytes: number, decimals = 2) {
@@ -24,6 +25,7 @@ export default function FileTree({
   onRemoveFile,
   onClearAll,
   disabled,
+  onEditFile,
 }: FileTreeProps) {
   const [search, setSearch] = useState('');
   const [previewFile, setPreviewFile] = useState<UploadFile | null>(null);
@@ -145,9 +147,23 @@ export default function FileTree({
                       >
                         <Eye className="w-3.5 h-3.5" />
                       </button>
+                      {onEditFile && !disabled && (
+                        <button
+                          onClick={() => onEditFile(file)}
+                          className="p-1.5 hover:bg-amber-500/15 text-slate-400 hover:text-amber-400 rounded-lg transition duration-150"
+                          title="Edit file inline"
+                          type="button"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       {!disabled && (
                         <button
-                          onClick={() => onRemoveFile(file.id)}
+                          onClick={() => {
+                            if (window.confirm(`Are you sure you want to remove ${file.name} from staged files?`)) {
+                              onRemoveFile(file.id);
+                            }
+                          }}
                           className="p-1.5 hover:bg-rose-500/15 text-slate-400 hover:text-rose-400 rounded-lg transition duration-150"
                           title="Remove file"
                           type="button"

@@ -316,7 +316,8 @@ export async function deleteFileFromRepo(
     sha,
     branch,
   };
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+  const encodedPath = cleanPath.split('/').map(encodeURIComponent).join('/');
   return githubFetch(`/repos/${owner}/${repo}/contents/${encodedPath}`, {
     token,
     method: 'DELETE',
@@ -345,7 +346,8 @@ export async function uploadSingleFileToRepo(
   if (sha) {
     body.sha = sha;
   }
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+  const encodedPath = cleanPath.split('/').map(encodeURIComponent).join('/');
   return githubFetch(`/repos/${owner}/${repo}/contents/${encodedPath}`, {
     token,
     method: 'PUT',
