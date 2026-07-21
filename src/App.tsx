@@ -23,8 +23,7 @@ export default function App() {
   const [user, setUser] = useState<GitHubUser | null>(null);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [orgs, setOrgs] = useState<GitHubOrg[]>([]);
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'ai' | 'stats'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'ai' | 'stats' | 'settings'>('dashboard');
 
   const [accounts, setAccounts] = useState<Array<{ token: string; user: GitHubUser }>>(() => {
     try {
@@ -106,13 +105,35 @@ export default function App() {
   // Fetch user repos & orgs
   const handleRefreshRepos = useCallback(async (activeToken: string = token) => {
     if (!activeToken) return;
+    
+    // 1. Load instantly from sessionStorage cache if available for near 0ms latency
+    const cacheKeyRepos = `repostnow_cache_repos_${activeToken.slice(-8)}`;
+    const cacheKeyOrgs = `repostnow_cache_orgs_${activeToken.slice(-8)}`;
+    const cachedRepos = sessionStorage.getItem(cacheKeyRepos);
+    const cachedOrgs = sessionStorage.getItem(cacheKeyOrgs);
+    
+    if (cachedRepos && cachedOrgs) {
+      try {
+        setRepos(JSON.parse(cachedRepos));
+        setOrgs(JSON.parse(cachedOrgs));
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+
     try {
+      // 2. Fetch fresh values in parallel
       const [userRepos, userOrgs] = await Promise.all([
         fetchUserRepos(activeToken),
         fetchUserOrgs(activeToken),
       ]);
+      
       setRepos(userRepos);
       setOrgs(userOrgs);
+      
+      // 3. Populate sessionStorage cache for next load
+      sessionStorage.setItem(cacheKeyRepos, JSON.stringify(userRepos));
+      sessionStorage.setItem(cacheKeyOrgs, JSON.stringify(userOrgs));
     } catch (fetchErr) {
       console.error('Failed to load full repositories list:', fetchErr);
     }
@@ -159,6 +180,26 @@ export default function App() {
     safeStorage.removeItem(STORAGE_KEY);
     setFiles([]);
   };
+
+  // Handle immediate local removal of a deleted repository (counteract API consistency lag)
+  const handleDeleteRepoSuccess = useCallback((repoId: number) => {
+    setRepos((prev) => {
+      const filtered = prev.filter((r) => r.id !== repoId);
+      const cacheKeyRepos = `repostnow_cache_repos_${token.slice(-8)}`;
+      sessionStorage.setItem(cacheKeyRepos, JSON.stringify(filtered));
+      return filtered;
+    });
+  }, [token]);
+
+  // Handle immediate local update of modified repository settings (counteract API consistency lag)
+  const handleUpdateRepoSuccess = useCallback((repoId: number, name: string, isPrivate: boolean) => {
+    setRepos((prev) => {
+      const updated = prev.map((r) => r.id === repoId ? { ...r, name, private: isPrivate, full_name: `${r.owner?.login}/${name}` } : r);
+      const cacheKeyRepos = `repostnow_cache_repos_${token.slice(-8)}`;
+      sessionStorage.setItem(cacheKeyRepos, JSON.stringify(updated));
+      return updated;
+    });
+  }, [token]);
 
 
   // Add files to staging, avoiding duplicates based on relative path
@@ -531,6 +572,7 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                     <AiAssistantPanel
                       stagedFiles={files}
                       onUpdateStagedFiles={setFiles}
+                      repos={repos}
                     />
                   </motion.div>
                 )}
@@ -573,6 +615,8 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                       accounts={accounts}
                       onSwitchAccount={handleSwitchAccount}
                       onRemoveAccount={handleRemoveAccount}
+                      onDeleteRepoSuccess={handleDeleteRepoSuccess}
+                      onUpdateRepoSuccess={handleUpdateRepoSuccess}
                     />
                   </motion.div>
                 )}
@@ -621,22 +665,6 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
           <span className="text-[10px] mt-1 font-mono">Settings</span>
         </button>
       </nav>
-
-      {/* Workspace Control Center split-pane drawer/dialog overlay */}
-      <SettingsPanel
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        token={token}
-        user={user}
-        repos={repos}
-        stagedFiles={files}
-        onConnectToken={handleConnectToken}
-        onDisconnect={handleDisconnect}
-        onRefreshRepos={handleRefreshRepos}
-        accounts={accounts}
-        onSwitchAccount={handleSwitchAccount}
-        onRemoveAccount={handleRemoveAccount}
-      />
     </div>
   );
 }

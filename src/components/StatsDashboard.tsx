@@ -32,6 +32,79 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
     return Number(localStorage.getItem('repostnow_queries_count') || '148');
   });
 
+  // Real-time Traffic Simulator state
+  const [trafficLogs, setTrafficLogs] = useState<Array<{ id: string; time: string; method: string; path: string; status: number; duration: number; ip: string }>>([]);
+  const [realtimeMetrics, setRealtimeMetrics] = useState({
+    requestsCount: 1420,
+    avgLatency: 42,
+    bandwidthKb: 852.4,
+    successRate: 99.8,
+    activeSockets: 3
+  });
+  const [systemLoad, setSystemLoad] = useState({ cpu: 12, mem: 44.2 });
+
+  // Real-time simulation loop
+  useEffect(() => {
+    // Generate initial logs
+    const methods = ['GET', 'POST', 'PUT', 'GET', 'GET'];
+    const paths = ['/index.html', '/api/gemini/chat', '/src/App.tsx', '/assets/index.css', '/metadata.json', '/favicon.ico'];
+    const statuses = [200, 200, 200, 200, 304, 201, 404];
+    const initialLogs = Array.from({ length: 6 }).map((_, i) => {
+      const date = new Date(Date.now() - (6 - i) * 3000);
+      return {
+        id: Math.random().toString(36).substring(7),
+        time: date.toLocaleTimeString(),
+        method: methods[Math.floor(Math.random() * methods.length)],
+        path: paths[Math.floor(Math.random() * paths.length)],
+        status: statuses[Math.floor(Math.random() * (statuses.length - 1))], // favor 200/304
+        duration: Math.floor(Math.random() * 120) + 10,
+        ip: `192.168.1.${Math.floor(Math.random() * 254) + 1}`
+      };
+    });
+    setTrafficLogs(initialLogs);
+
+    // Dynamic updates every 2.5 seconds
+    const interval = setInterval(() => {
+      const now = new Date();
+      const newLog = {
+        id: Math.random().toString(36).substring(7),
+        time: now.toLocaleTimeString(),
+        method: methods[Math.floor(Math.random() * methods.length)],
+        path: paths[Math.floor(Math.random() * paths.length)],
+        status: Math.random() > 0.95 ? 404 : statuses[Math.floor(Math.random() * (statuses.length - 1))],
+        duration: Math.floor(Math.random() * 110) + 8,
+        ip: `192.168.1.${Math.floor(Math.random() * 254) + 1}`
+      };
+
+      setTrafficLogs(prev => [newLog, ...prev.slice(0, 7)]);
+      
+      // Fluctuated metrics
+      setRealtimeMetrics(prev => {
+        const reqAdded = Math.floor(Math.random() * 3) + 1;
+        const newTotal = prev.requestsCount + reqAdded;
+        const latencyDiff = Math.random() > 0.5 ? 1 : -1;
+        const newLatency = Math.max(25, Math.min(85, prev.avgLatency + latencyDiff));
+        const bandwidthAdded = parseFloat((Math.random() * 15.2).toFixed(1));
+        const newBandwidth = parseFloat((prev.bandwidthKb + bandwidthAdded).toFixed(1));
+        
+        return {
+          requestsCount: newTotal,
+          avgLatency: newLatency,
+          bandwidthKb: newBandwidth,
+          successRate: parseFloat((99.5 + Math.random() * 0.49).toFixed(2)),
+          activeSockets: Math.floor(Math.random() * 4) + 2
+        };
+      });
+
+      setSystemLoad({
+        cpu: Math.floor(Math.random() * 20) + 5,
+        mem: parseFloat((42.1 + Math.random() * 2.5).toFixed(1))
+      });
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Load Vercel status on mount or token change
   useEffect(() => {
     if (vercelToken) {
@@ -523,6 +596,127 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* REAL-TIME SYSTEM PERFORMANCE MONITOR & WEB TRAFFIC TERMINAL */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Live system load dials */}
+        <div className="lg:col-span-4 bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl flex flex-col justify-between space-y-4">
+          <div>
+            <h4 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+              <span>Real-Time Engine Telemetry</span>
+            </h4>
+            <p className="text-slate-500 text-xs">Simulated live engine resources and system process loads.</p>
+          </div>
+
+          <div className="space-y-4 flex-1 flex flex-col justify-center">
+            {/* CPU */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] font-mono">
+                <span className="text-slate-400">STUDIO CORE CPU:</span>
+                <span className="text-emerald-400 font-bold">{systemLoad.cpu}%</span>
+              </div>
+              <div className="w-full bg-[#0A0A0C] h-2 rounded-full overflow-hidden border border-white/5">
+                <div 
+                  className="bg-emerald-500 h-full rounded-full transition-all duration-1000" 
+                  style={{ width: `${systemLoad.cpu}%` }}
+                />
+              </div>
+            </div>
+
+            {/* RAM */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] font-mono">
+                <span className="text-slate-400">MEM BUFFER (RAM):</span>
+                <span className="text-indigo-400 font-bold">{systemLoad.mem}%</span>
+              </div>
+              <div className="w-full bg-[#0A0A0C] h-2 rounded-full overflow-hidden border border-white/5">
+                <div 
+                  className="bg-indigo-500 h-full rounded-full transition-all duration-1000" 
+                  style={{ width: `${systemLoad.mem}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Active Sockets / Threads */}
+            <div className="pt-2 border-t border-white/5 grid grid-cols-2 gap-2 text-center">
+              <div className="bg-[#0c0c0f] p-2.5 rounded-xl border border-white/5">
+                <span className="text-[9px] uppercase font-mono text-slate-500 block">Active Sockets</span>
+                <span className="text-sm font-black text-slate-200 mt-1 block font-mono">{realtimeMetrics.activeSockets} LNK</span>
+              </div>
+              <div className="bg-[#0c0c0f] p-2.5 rounded-xl border border-white/5">
+                <span className="text-[9px] uppercase font-mono text-slate-500 block">Refreshes</span>
+                <span className="text-sm font-black text-slate-200 mt-1 block font-mono">Auto (2.5s)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Real-time traffic terminal */}
+        <div className="lg:col-span-8 bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl space-y-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h4 className="font-bold text-slate-100 text-sm flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2 mr-1">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                </span>
+                <span>Live Deployments Server Analytics (Streaming)</span>
+              </h4>
+              <p className="text-slate-500 text-xs">Simulated live hits and payload transfers on your build artifacts.</p>
+            </div>
+            
+            <div className="text-right text-[10px] font-mono text-slate-500 bg-black/40 px-2 py-1 rounded border border-white/5">
+              <span>RATE: {realtimeMetrics.requestsCount} REQ</span>
+            </div>
+          </div>
+
+          {/* Metrics header */}
+          <div className="grid grid-cols-4 gap-2 text-center py-2.5 px-1 bg-[#0c0c0f]/80 rounded-2xl border border-white/5 text-[10px] font-mono">
+            <div>
+              <span className="text-slate-500 block uppercase">Requests</span>
+              <span className="text-slate-200 font-bold mt-0.5 block">{realtimeMetrics.requestsCount}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 block uppercase">Latency</span>
+              <span className="text-slate-200 font-bold mt-0.5 block text-indigo-400">{realtimeMetrics.avgLatency}ms</span>
+            </div>
+            <div>
+              <span className="text-slate-500 block uppercase">Bandwidth</span>
+              <span className="text-slate-200 font-bold mt-0.5 block text-amber-400">{(realtimeMetrics.bandwidthKb).toFixed(1)} KB</span>
+            </div>
+            <div>
+              <span className="text-slate-500 block uppercase">Success</span>
+              <span className="text-slate-200 font-bold mt-0.5 block text-emerald-400">{realtimeMetrics.successRate}%</span>
+            </div>
+          </div>
+
+          {/* Scrolling shell output */}
+          <div className="bg-[#050507] rounded-2xl border border-white/5 p-4 h-44 overflow-y-auto font-mono text-[10px] sm:text-xs leading-5 text-slate-300 scrollbar-none flex flex-col-reverse text-left">
+            {trafficLogs.map((log) => {
+              const isError = log.status >= 400;
+              return (
+                <div key={log.id} className="flex flex-wrap items-center gap-1.5 opacity-90 border-b border-white/[0.01] pb-1 hover:bg-white/[0.02]">
+                  <span className="text-slate-600 font-bold select-none">[{log.time}]</span>
+                  <span className={`px-1.5 py-0.2 rounded font-extrabold text-[9px] ${
+                    log.method === 'POST' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/10' :
+                    log.method === 'PUT' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/10' :
+                    'bg-slate-800 text-slate-400 border border-white/5'
+                  }`}>{log.method}</span>
+                  <span className="text-slate-200 flex-1 truncate max-w-[200px] sm:max-w-xs">{log.path}</span>
+                  <span className="text-slate-500">from {log.ip}</span>
+                  <span className={`font-bold ml-auto px-1.5 rounded text-[9px] ${
+                    isError ? 'bg-red-500/15 text-red-400 font-extrabold border border-red-500/10' :
+                    log.status === 304 ? 'bg-slate-700/30 text-slate-400' :
+                    'bg-emerald-500/15 text-emerald-400 font-extrabold border border-emerald-500/10'
+                  }`}>{log.status} {log.status === 200 ? 'OK' : log.status === 304 ? 'CACHED' : log.status === 201 ? 'CREATED' : 'FAIL'}</span>
+                  <span className="text-slate-500 text-[10px] w-12 text-right">{log.duration}ms</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

@@ -500,7 +500,7 @@ export async function updateRepository(
   token: string,
   owner: string,
   repo: string,
-  updateData: { name?: string; private?: boolean }
+  updateData: { name?: string; private?: boolean; visibility?: 'private' | 'public' }
 ): Promise<any> {
   return githubFetch(`/repos/${owner}/${repo}`, {
     token,

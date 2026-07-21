@@ -412,12 +412,63 @@ export default function AiAssistantPanel({
       }
 
       if (command === '/build' && arg) {
-        const fileMatch = arg.match(/^([\w.-]+)\s+([\s\S]+)$/);
+        const fileMatch = arg.match(/^([\w.\-\/]+)\s+([\s\S]+)$/);
         if (fileMatch) {
           const fileName = fileMatch[1];
-          const instructions = fileMatch[2];
-          // Execute local file build trigger with a placeholder mockup, but let the AI do it if online
+          const fileContent = fileMatch[2];
+          handleInjectFileToWorkspace(fileName, fileContent);
+          insertLocalAssistantMessage(
+            `✅ **File Created and Staged!**\n\nI have successfully built and staged \`${fileName}\` with your requested contents in the staging area. You can see it on your home dashboard.`,
+            ['Parsing build request', `Writing file contents for ${fileName}`],
+            undefined,
+            [`Wrote ${fileName} to staging`]
+          );
+          return;
+        } else {
+          insertLocalAssistantMessage(
+            `⚠️ **Invalid /build syntax!**\n\nUse \`/build <filename> <content>\` (e.g. \`/build style.css h1 { color: red; }\`)`,
+            ['Validating command parameters'],
+            undefined,
+            ['Command error: invalid /build syntax']
+          );
+          return;
         }
+      }
+
+      if (command === '/add' && arg) {
+        const fileName = arg.trim();
+        if (fileName) {
+          const fileContent = `// Created via RepostNow Studio AI\n// File: ${fileName}\n\nexport default function ${fileName.split('.')[0]}() {\n  return <div>Custom component</div>;\n}`;
+          handleInjectFileToWorkspace(fileName, fileContent);
+          insertLocalAssistantMessage(
+            `✅ **File "${fileName}" Staged!**\n\nI have created a template file \`${fileName}\` and added it to your staging workspace successfully!`,
+            [`Staging ${fileName}`],
+            undefined,
+            [`Staged file: ${fileName}`]
+          );
+          return;
+        }
+      }
+
+      if (command === '/push' || command === '/upload') {
+        if (stagedFiles.length === 0) {
+          insertLocalAssistantMessage(
+            `⚠️ **No files to push!**\n\nStaging is empty. Drag and drop files onto the home tab or use \`/build\` to create files first.`,
+            ['Scanning local workspace'],
+            undefined,
+            ['Push error: staging is empty']
+          );
+          return;
+        }
+        
+        insertLocalAssistantMessage(
+          `📤 **Repository Push Initialized!**\n\nI am preparing **${stagedFiles.length} staged files** to be pushed to GitHub.\n\n` +
+          `Please complete the upload using the **"Upload Repository"** button on the home dashboard column to choose your repository name, visibility, and branch parameters securely.`,
+          ['Validating file structures', 'Bundling code payloads'],
+          undefined,
+          stagedFiles.map(f => `Bundled: ${f.name}`)
+        );
+        return;
       }
     }
 
@@ -469,27 +520,46 @@ export default function AiAssistantPanel({
         { role: 'user', content: finalPrompt }
       ];
 
-      const response = await fetch(activeEp.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: payloadMessages,
-          model: modelParam,
-          temperature: aiMode === 'studio' ? 0.2 : 0.7
-        })
-      });
-
       let responseText = '';
-      if (response.ok) {
-        responseText = await response.text();
-      } else {
-        // Fallback to Pollinations GET if active endpoint fails
-        const encoded = encodeURIComponent(finalPrompt);
-        const fallbackRes = await fetch(`https://text.pollinations.ai/${encoded}?system=${encodeURIComponent(systemPrompt)}&model=${modelParam}`);
-        if (fallbackRes.ok) {
-          responseText = await fallbackRes.text();
+      if (activeEp.id === 'pollinations') {
+        const response = await fetch('/api/gemini/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: payloadMessages,
+            systemPrompt: systemPrompt,
+            temperature: aiMode === 'studio' ? 0.2 : 0.7
+          })
+        });
+
+        if (response.ok) {
+          responseText = await response.text();
         } else {
-          throw new Error('All code-studio compilation endpoints timed out. Please check network routing.');
+          const errMsg = await response.text();
+          throw new Error(errMsg || 'Gemini API Error. Please try again.');
+        }
+      } else {
+        const response = await fetch(activeEp.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: payloadMessages,
+            model: modelParam,
+            temperature: aiMode === 'studio' ? 0.2 : 0.7
+          })
+        });
+
+        if (response.ok) {
+          responseText = await response.text();
+        } else {
+          // Fallback to Pollinations GET if active endpoint fails
+          const encoded = encodeURIComponent(finalPrompt);
+          const fallbackRes = await fetch(`https://text.pollinations.ai/${encoded}?system=${encodeURIComponent(systemPrompt)}&model=${modelParam}`);
+          if (fallbackRes.ok) {
+            responseText = await fallbackRes.text();
+          } else {
+            throw new Error('All code-studio compilation endpoints timed out. Please check network routing.');
+          }
         }
       }
 
@@ -625,6 +695,127 @@ export default function AiAssistantPanel({
     });
   };
 
+  // Advanced, ultra-polished, secure client-side markdown formatter
+  const parseMarkdownText = (text: string) => {
+    if (!text) return '';
+    
+    // Split text into paragraphs/lines to format list items and paragraphs
+    const lines = text.split('\n');
+    return lines.map((line, idx) => {
+      const trimmed = line.trim();
+      
+      // 1. Headers (### or ## or #)
+      if (trimmed.startsWith('###')) {
+        return (
+          <h4 key={idx} className="text-xs font-bold text-slate-100 uppercase tracking-wider font-mono text-indigo-400 mt-4 mb-2">
+            {formatInlineMarkdown(trimmed.replace('###', '').trim())}
+          </h4>
+        );
+      }
+      if (trimmed.startsWith('##')) {
+        return (
+          <h3 key={idx} className="text-sm font-bold text-slate-50 tracking-tight mt-5 mb-2.5 border-b border-white/5 pb-1 text-indigo-400">
+            {formatInlineMarkdown(trimmed.replace('##', '').trim())}
+          </h3>
+        );
+      }
+      if (trimmed.startsWith('#')) {
+        return (
+          <h2 key={idx} className="text-base font-black text-white tracking-tight mt-6 mb-3 text-indigo-400">
+            {formatInlineMarkdown(trimmed.replace('#', '').trim())}
+          </h2>
+        );
+      }
+
+      // 2. Unordered List Items (- or *)
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        const content = trimmed.substring(2);
+        return (
+          <div key={idx} className="flex items-start gap-2 ml-4 my-1 text-slate-300 text-xs sm:text-sm text-left">
+            <span className="text-indigo-400 select-none mt-1.5 text-[6px]">●</span>
+            <span className="flex-1">{formatInlineMarkdown(content)}</span>
+          </div>
+        );
+      }
+
+      // 3. Numbered List Items (1. or 2.)
+      const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+      if (numMatch) {
+        return (
+          <div key={idx} className="flex items-start gap-2 ml-4 my-1 text-slate-300 text-xs sm:text-sm text-left">
+            <span className="text-indigo-400 font-mono font-bold select-none text-xs">{numMatch[1]}.</span>
+            <span className="flex-1">{formatInlineMarkdown(numMatch[2])}</span>
+          </div>
+        );
+      }
+
+      // 4. Empty lines
+      if (!trimmed) {
+        return <div key={idx} className="h-2" />;
+      }
+
+      // 5. Normal paragraphs
+      return (
+        <p key={idx} className="leading-relaxed text-slate-300 text-xs sm:text-sm my-1 text-left">
+          {formatInlineMarkdown(line)}
+        </p>
+      );
+    });
+  };
+
+  // Helper to format inline tags (bold, inline code, links)
+  const formatInlineMarkdown = (text: string) => {
+    let parts: Array<string | React.ReactNode> = [text];
+    
+    // Process Bold (**text**)
+    parts = parts.flatMap(part => {
+      if (typeof part !== 'string') return part;
+      const subParts = part.split(/\*\*([\s\S]*?)\*\*/g);
+      return subParts.map((sub, i) => (i % 2 === 1) ? <strong key={i} className="font-extrabold text-white bg-white/5 px-1 py-0.5 rounded">{sub}</strong> : sub);
+    });
+
+    // Process Inline Code (`code`)
+    parts = parts.flatMap(part => {
+      if (typeof part !== 'string') return part;
+      const subParts = part.split(/`([^`]+)`/g);
+      return subParts.map((sub, i) => (i % 2 === 1) ? <code key={i} className="font-mono text-xs text-indigo-300 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-500/15 font-semibold">{sub}</code> : sub);
+    });
+
+    // Process Links ([label](url))
+    parts = parts.flatMap(part => {
+      if (typeof part !== 'string') return part;
+      const subParts = part.split(/\[([^\]]+)\]\(([^)]+)\)/g);
+      const result = [];
+      for (let i = 0; i < subParts.length; i += 3) {
+        result.push(subParts[i]);
+        if (i + 1 < subParts.length) {
+          result.push(
+            <a key={i} href={subParts[i + 2]} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold inline-flex items-center gap-0.5">
+              {subParts[i + 1]}
+              <LinkIcon className="w-3 h-3 inline text-indigo-400" />
+            </a>
+          );
+        }
+      }
+      return result;
+    });
+
+    // Highlight Slash commands specifically in blue
+    parts = parts.flatMap(part => {
+      if (typeof part !== 'string') return part;
+      const regex = /(\/(menu|build|code|repos|deploy|add)(?:\b|\s))/gi;
+      const subParts = part.split(regex);
+      return subParts.map((sub, i) => {
+        if (sub.toLowerCase().startsWith('/menu') || sub.toLowerCase().startsWith('/build') || sub.toLowerCase().startsWith('/code') || sub.toLowerCase().startsWith('/repos') || sub.toLowerCase().startsWith('/deploy') || sub.toLowerCase().startsWith('/add')) {
+          return <span key={i} className="text-blue-400 font-extrabold font-mono">{sub}</span>;
+        }
+        return sub;
+      });
+    });
+
+    return parts;
+  };
+
   const renderMessageContent = (msg: Message) => {
     const text = msg.content;
     const parts = [];
@@ -663,8 +854,8 @@ export default function AiAssistantPanel({
         {parts.map((part, pIdx) => {
           if (part.type === 'text') {
             return (
-              <div key={`msg-part-${pIdx}`} className="leading-relaxed whitespace-pre-wrap font-sans text-xs sm:text-sm text-slate-300">
-                {formatTextWithBlueCommands(part.content)}
+              <div key={`msg-part-${pIdx}`} className="leading-relaxed font-sans text-xs sm:text-sm text-slate-300">
+                {parseMarkdownText(part.content)}
               </div>
             );
           } else {
@@ -1035,6 +1226,30 @@ export default function AiAssistantPanel({
           )}
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Attached Files Preview Bar */}
+        {attachedFiles.length > 0 && (
+          <div className="px-4 py-2 bg-[#0C0C0E] border-t border-white/5 flex flex-wrap gap-2">
+            {attachedFiles.map((file) => (
+              <div
+                key={file.id}
+                className="flex items-center gap-2 bg-[#141417] border border-white/10 rounded-lg pl-3 pr-1.5 py-1 text-xs animate-fade-in"
+              >
+                <Paperclip className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                <span className="text-slate-300 font-medium font-mono truncate max-w-[150px]">{file.name}</span>
+                <span className="text-slate-500 font-mono text-[9px]">({(file.size / 1024).toFixed(1)} KB)</span>
+                <button
+                  type="button"
+                  onClick={() => setAttachedFiles(prev => prev.filter(f => f.id !== file.id))}
+                  className="p-1 hover:bg-white/5 rounded-md text-slate-400 hover:text-rose-400 transition"
+                  title="Remove attachment"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* INPUT FORM PANEL */}
         <form onSubmit={handleSendMessage} className="p-4 bg-[#0E0E10] border-t border-white/5 flex gap-2">

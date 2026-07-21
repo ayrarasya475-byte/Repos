@@ -30,6 +30,8 @@ interface SettingsPanelProps {
   accounts?: Array<{ token: string; user: GitHubUser }>;
   onSwitchAccount?: (token: string) => void;
   onRemoveAccount?: (login: string) => void;
+  onDeleteRepoSuccess?: (repoId: number) => void;
+  onUpdateRepoSuccess?: (repoId: number, name: string, isPrivate: boolean) => void;
 }
 
 type ScreenType = 'home' | 'auth' | 'repos' | 'repo-detail' | 'deploy' | 'profile' | 'repo-config';
@@ -47,7 +49,9 @@ export default function SettingsPanel({
   isInline = false,
   accounts = [],
   onSwitchAccount,
-  onRemoveAccount
+  onRemoveAccount,
+  onDeleteRepoSuccess,
+  onUpdateRepoSuccess
 }: SettingsPanelProps) {
   // Navigation screen
   const [screen, setScreen] = useState<ScreenType>('home');
@@ -77,6 +81,9 @@ export default function SettingsPanel({
 
   // Deleting File State
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+
+  // Set to filter out deleted paths to counteract GitHub's eventual consistency latency
+  const [deletedPaths, setDeletedPaths] = useState<Set<string>>(() => new Set());
 
   // Captcha Modal Overlay states
   const [captchaOpen, setCaptchaOpen] = useState(false);
@@ -187,11 +194,13 @@ export default function SettingsPanel({
       const contents = await fetchRepoContents(token, repo.owner?.login || '', repo.name, path, repo.default_branch || 'main');
       // Sort: folders first, then files
       const sorted = Array.isArray(contents) 
-        ? contents.sort((a, b) => {
-            if (a.type === 'dir' && b.type !== 'dir') return -1;
-            if (a.type !== 'dir' && b.type === 'dir') return 1;
-            return a.name.localeCompare(b.name);
-          })
+        ? contents
+            .filter((c: any) => !deletedPaths.has(`${repo.name}/${c.path}`))
+            .sort((a, b) => {
+              if (a.type === 'dir' && b.type !== 'dir') return -1;
+              if (a.type !== 'dir' && b.type === 'dir') return 1;
+              return a.name.localeCompare(b.name);
+            })
         : [contents];
       setRepoContents(sorted);
     } catch (err: any) {
@@ -221,7 +230,11 @@ export default function SettingsPanel({
         setLoading(true);
         try {
           await deleteRepository(token, repo.owner?.login || '', repo.name);
-          onRefreshRepos();
+          if (onDeleteRepoSuccess && repo.id) {
+            onDeleteRepoSuccess(repo.id);
+          } else {
+            onRefreshRepos();
+          }
           alert(`Successfully deleted repository ${repo.name}`);
         } catch (err: any) {
           alert(`Failed to delete repository: ${err.message}. Ensure your token has 'delete_repo' scope.`);
@@ -279,13 +292,21 @@ export default function SettingsPanel({
       }
       setDeletingFile(null);
       
+      // Add to deleted paths to prevent eventual consistency resurrects
+      const key = `${selectedRepo.name}/${item.path}`;
+      setDeletedPaths(prev => {
+        const copy = new Set(prev);
+        copy.add(key);
+        return copy;
+      });
+
       // Optimistic update: filter out the deleted item from local state instantly
       setRepoContents(prev => prev.filter(c => c.path !== item.path));
 
-      // Wait 1 second before doing the real GitHub refresh to let GitHub's eventual consistency settle
+      // Wait 1.5 seconds before doing the real GitHub refresh to let GitHub's eventual consistency settle
       setTimeout(() => {
         handleBrowseRepo(selectedRepo, currentPath);
-      }, 1000);
+      }, 1500);
     } catch (err: any) {
       alert(`Failed to delete item: ${err.message}`);
     } finally {
@@ -314,12 +335,20 @@ export default function SettingsPanel({
     if (!configRepo) return;
     setRepoUpdating(true);
     try {
+      const targetName = newRepoName.trim() || configRepo.name;
       await updateRepository(token, configRepo.owner?.login || '', configRepo.name, {
-        name: newRepoName.trim(),
+        name: targetName,
         private: isRepoPrivate,
+        visibility: isRepoPrivate ? 'private' : 'public'
       });
       alert('Repository updated successfully!');
-      onRefreshRepos();
+      
+      if (onUpdateRepoSuccess && configRepo.id) {
+        onUpdateRepoSuccess(configRepo.id, targetName, isRepoPrivate);
+      } else {
+        onRefreshRepos();
+      }
+      
       setScreen('repos');
     } catch (err: any) {
       alert(`Failed to update repository: ${err.message}`);

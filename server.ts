@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
 
 async function startServer() {
   const app = express();
@@ -64,6 +65,59 @@ async function startServer() {
   // API parser helper
   app.use("/api/proxy-vercel-deployments", express.json({ limit: "100mb" }));
   app.use("/api/proxy-vercel-projects", express.json());
+
+  // Lazy-initialized Gemini AI client SDK
+  let ai: any = null;
+  function getAI() {
+    if (!ai) {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY environment variable is not defined on the server.");
+      }
+      ai = new GoogleGenAI({ apiKey });
+    }
+    return ai;
+  }
+
+  // Secure full-stack Gemini assistant endpoint
+  app.post('/api/gemini/chat', express.json({ limit: '50mb' }), async (req, res) => {
+    const { messages, systemPrompt, temperature } = req.body;
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).send("Error: 'messages' array is required in the request body.");
+    }
+
+    try {
+      const googleAi = getAI();
+      
+      // Map message history cleanly:
+      // Translate 'assistant' to 'model' for Gemini SDK, filter out system roles
+      const contents = messages
+        .filter((m: any) => m.role !== 'system')
+        .map((m: any) => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          parts: [{ text: m.content }]
+        }));
+
+      // Use the standard high-performance general task model
+      const modelName = "gemini-2.5-flash";
+
+      const result = await googleAi.models.generateContent({
+        model: modelName,
+        contents: contents,
+        config: {
+          systemInstruction: systemPrompt || "You are an expert full-stack developer in RepostNow Code Studio. Write elegant, production-ready code with detailed comments.",
+          temperature: typeof temperature === 'number' ? temperature : 0.7,
+        }
+      });
+
+      const responseText = result.text || "";
+      res.setHeader('Content-Type', 'text/plain');
+      res.send(responseText);
+    } catch (error: any) {
+      console.error("Gemini API Error in /api/gemini/chat:", error);
+      res.status(500).send(`AI Error: ${error.message || "Failed to generate AI response"}`);
+    }
+  });
 
   // GitHub Proxy to fetch repo ZIP archives securely bypassing CORS
   app.get('/api/proxy-github-zip', async (req, res) => {
