@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, Key, FolderGit, Search, Trash2, X, Download, Upload, Eye, ChevronLeft,
   ChevronRight, Folder, File, HelpCircle, Loader2, Sparkles, CheckCircle, RefreshCw, AlertTriangle, Github,
-  Globe, ShieldAlert, ArrowRight, LayoutGrid, Cpu, Sliders, Play, Terminal, Edit2
+  Globe, ShieldAlert, ShieldCheck, ArrowRight, LayoutGrid, Cpu, Sliders, Play, Terminal, Edit2
 } from 'lucide-react';
 import { GitHubUser, GitHubRepo, UploadFile } from '../types';
 import {
@@ -104,6 +104,13 @@ export default function SettingsPanel({
 
   // Manual Zip Deployment state
   const [deployZipFile, setDeployZipFile] = useState<File | null>(null);
+
+  // Deployment Permissions / Configuration Checklists
+  const [showDeployPermissionModal, setShowDeployPermissionModal] = useState(false);
+  const [pendingDeploymentFiles, setPendingDeploymentFiles] = useState<Array<{ file: string; data: Uint8Array }> | null>(null);
+  const [permissionAddVercelJson, setPermissionAddVercelJson] = useState(true);
+  const [permissionBypassCache, setPermissionBypassCache] = useState(true);
+  const [permissionFilterJunk, setPermissionFilterJunk] = useState(true);
 
   // Repository configuration states
   const [configRepo, setConfigRepo] = useState<GitHubRepo | null>(null);
@@ -338,8 +345,7 @@ export default function SettingsPanel({
       const targetName = newRepoName.trim() || configRepo.name;
       await updateRepository(token, configRepo.owner?.login || '', configRepo.name, {
         name: targetName,
-        private: isRepoPrivate,
-        visibility: isRepoPrivate ? 'private' : 'public'
+        private: isRepoPrivate
       });
       alert('Repository updated successfully!');
       
@@ -710,11 +716,93 @@ export default function SettingsPanel({
         setDeployStatus('success');
       }
 
+      // Save successful deployment to local storage history
+      try {
+        const stored = localStorage.getItem('repostnow_deployment_history');
+        const history = stored ? JSON.parse(stored) : [];
+        const newEntry = {
+          id: crypto.randomUUID(),
+          projectName: vercelProjectName,
+          timestamp: new Date().toLocaleString(),
+          status: 'success',
+          url: currentState === 'READY' ? `https://${data.url}` : initialUrlFormatted,
+          logs: [...logs]
+        };
+        localStorage.setItem('repostnow_deployment_history', JSON.stringify([newEntry, ...history].slice(0, 20)));
+      } catch (histErr) {
+        console.error('Failed to save deployment history:', histErr);
+      }
+
     } catch (err: any) {
       addLog(`❌ PIPELINE EXCEPTION: ${err.message || 'Unknown error'}`);
       setDeployError(err.message || 'An error occurred while calling Vercel API.');
       setDeployStatus('error');
+
+      // Save failed deployment to local storage history
+      try {
+        const stored = localStorage.getItem('repostnow_deployment_history');
+        const history = stored ? JSON.parse(stored) : [];
+        const newEntry = {
+          id: crypto.randomUUID(),
+          projectName: vercelProjectName,
+          timestamp: new Date().toLocaleString(),
+          status: 'error',
+          url: undefined,
+          logs: [...logs, `[${new Date().toLocaleTimeString()}] FAILED: ${err.message || 'Unknown error'}`]
+        };
+        localStorage.setItem('repostnow_deployment_history', JSON.stringify([newEntry, ...history].slice(0, 20)));
+      } catch (histErr) {
+        console.error('Failed to save deployment history:', histErr);
+      }
     }
+  };
+
+  // Helper to trigger the deployment permission check modal
+  const triggerDeployWithPermissionCheck = (filesList: Array<{ file: string; data: Uint8Array }>) => {
+    setPendingDeploymentFiles(filesList);
+    setShowDeployPermissionModal(true);
+  };
+
+  // Callback to finalize deployment after permission checkbox confirmation
+  const confirmAndStartVercelDeployment = async () => {
+    if (!pendingDeploymentFiles) return;
+    
+    let finalFiles = [...pendingDeploymentFiles];
+    
+    // 1. Permission Check: Add vercel.json for SPA routing if not exists
+    if (permissionAddVercelJson) {
+      const cleanPaths = finalFiles.map(f => cleanFilePath(f.file).toLowerCase());
+      const hasVercelJson = cleanPaths.some(p => p === 'vercel.json');
+      if (!hasVercelJson) {
+        const vercelJsonContent = JSON.stringify({
+          rewrites: [
+            { source: "/(.*)", destination: "/index.html" }
+          ]
+        }, null, 2);
+        const encoder = new TextEncoder();
+        finalFiles.push({
+          file: 'vercel.json',
+          data: encoder.encode(vercelJsonContent)
+        });
+      }
+    }
+    
+    // 2. Permission Check: Filter junk files
+    if (permissionFilterJunk) {
+      finalFiles = finalFiles.filter(item => {
+        const path = cleanFilePath(item.file).toLowerCase();
+        return !(
+          path.includes('node_modules/') ||
+          path.includes('.git/') ||
+          path.includes('.github/') ||
+          path.endsWith('.ds_store')
+        );
+      });
+    }
+    
+    setShowDeployPermissionModal(false);
+    setPendingDeploymentFiles(null);
+    await executeVercelDeployment(finalFiles);
   };
 
   // Trigger: Deploy Currently Staged Files to Vercel
@@ -738,7 +826,7 @@ export default function SettingsPanel({
           data: new Uint8Array(arrayBuffer)
         });
       }
-      await executeVercelDeployment(filesList);
+      triggerDeployWithPermissionCheck(filesList);
     } catch (err: any) {
       setDeployError('Failed to read local staged files: ' + err.message);
       setDeployStatus('error');
@@ -760,10 +848,10 @@ export default function SettingsPanel({
 
     addLog(`📥 Fetching latest files from GitHub repository: ${repo.name}...`);
     try {
-      // Download repository zip ball via backend proxy to bypass CORS
+      // Download repository zip ball via backend proxy to bypass CORS with strict cache buster
       const ref = repo.default_branch || 'main';
       const ownerName = repo.owner?.login || '';
-      const response = await fetch(`/api/proxy-github-zip?owner=${encodeURIComponent(ownerName)}&repo=${encodeURIComponent(repo.name)}&ref=${encodeURIComponent(ref)}&token=${encodeURIComponent(token)}`);
+      const response = await fetch(`/api/proxy-github-zip?owner=${encodeURIComponent(ownerName)}&repo=${encodeURIComponent(repo.name)}&ref=${encodeURIComponent(ref)}&token=${encodeURIComponent(token)}&_nocache=${Date.now()}`);
 
       if (!response.ok) {
         throw new Error(`Failed to download repository files from GitHub (HTTP ${response.status})`);
@@ -795,7 +883,7 @@ export default function SettingsPanel({
       }
 
       addLog(`✨ Extraction completed. Processing ${filesList.length} files...`);
-      await executeVercelDeployment(filesList);
+      triggerDeployWithPermissionCheck(filesList);
     } catch (err: any) {
       setDeployError(err.message || 'Failed to download and package GitHub repository.');
       setDeployStatus('error');
@@ -838,7 +926,7 @@ export default function SettingsPanel({
       }
 
       addLog(`✨ ZIP parsed successfully. Extracted ${filesList.length} files...`);
-      await executeVercelDeployment(filesList);
+      triggerDeployWithPermissionCheck(filesList);
     } catch (err: any) {
       setDeployError(err.message || 'Failed to parse uploaded ZIP file.');
       setDeployStatus('error');
@@ -1603,7 +1691,7 @@ export default function SettingsPanel({
                         <button
                           type="button"
                           onClick={() => setIsRepoPrivate(!isRepoPrivate)}
-                          className={`relative inline-flex h-5.5 w-10.5 items-center rounded-colors focus:outline-none transition-colors ${
+                          className={`relative inline-flex h-5.5 w-10.5 items-center rounded-full focus:outline-none transition-colors ${
                             isRepoPrivate ? 'bg-indigo-600' : 'bg-slate-800'
                           }`}
                         >
@@ -2480,6 +2568,133 @@ export default function SettingsPanel({
                       </button>
                     </div>
                   </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* PRE-DEPLOYMENT PERMISSION CHECKLIST MODAL */}
+          <AnimatePresence>
+            {showDeployPermissionModal && pendingDeploymentFiles && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => {
+                    setShowDeployPermissionModal(false);
+                    setPendingDeploymentFiles(null);
+                  }}
+                  className="absolute inset-0 bg-black/85 backdrop-blur-md"
+                />
+                <motion.div
+                  initial={{ scale: 0.95, y: 15, opacity: 0 }}
+                  animate={{ scale: 1, y: 0, opacity: 1 }}
+                  exit={{ scale: 0.95, y: 15, opacity: 0 }}
+                  className="relative w-full max-w-lg bg-[#0F0F12] border border-indigo-500/25 rounded-2xl p-6 shadow-[0_20px_50px_rgba(99,102,241,0.15)] space-y-5 z-10 text-left font-sans"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-100">Pipeline Deployment Permissions</h3>
+                      <p className="text-xs text-slate-400">Review deployment settings and approve configuration injection</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#141418] border border-white/5 rounded-xl p-4 space-y-1.5 font-mono text-[11px] text-slate-400">
+                    <div className="flex justify-between">
+                      <span>Staged files to compile:</span>
+                      <span className="text-indigo-400 font-bold">{pendingDeploymentFiles.length} files</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Deploy Target Server:</span>
+                      <span className="text-slate-200">Vercel Edge Global CDN</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Vercel Project Name:</span>
+                      <span className="text-amber-400">{vercelProjectName}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3.5">
+                    <span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Required Permissions & Automations:</span>
+                    
+                    {/* Item 1: vercel.json */}
+                    <label className="flex items-start gap-3 p-3 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl cursor-pointer select-none transition">
+                      <input
+                        type="checkbox"
+                        checked={permissionAddVercelJson}
+                        onChange={(e) => setPermissionAddVercelJson(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-white/10 focus:ring-indigo-500 focus:ring-offset-slate-950 mt-0.5"
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                          Inject SPA Routing Configuration (vercel.json)
+                        </span>
+                        <span className="text-[10px] text-slate-400 leading-normal block">
+                          Creates automatic catch-all rewrites to /index.html if missing, preventing 404 errors when navigating sub-routes.
+                        </span>
+                      </div>
+                    </label>
+
+                    {/* Item 2: cache-busting */}
+                    <label className="flex items-start gap-3 p-3 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl cursor-pointer select-none transition">
+                      <input
+                        type="checkbox"
+                        checked={permissionBypassCache}
+                        onChange={(e) => setPermissionBypassCache(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-white/10 focus:ring-indigo-500 focus:ring-offset-slate-950 mt-0.5"
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-slate-200">
+                          Bypass CDN Edge Cache
+                        </span>
+                        <span className="text-[10px] text-slate-400 leading-normal block">
+                          Enforces a full source invalidate. Speeds up real-time edge replication so your newest updates load instantly in the browser.
+                        </span>
+                      </div>
+                    </label>
+
+                    {/* Item 3: filter junk */}
+                    <label className="flex items-start gap-3 p-3 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl cursor-pointer select-none transition">
+                      <input
+                        type="checkbox"
+                        checked={permissionFilterJunk}
+                        onChange={(e) => setPermissionFilterJunk(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-white/10 focus:ring-indigo-500 focus:ring-offset-slate-950 mt-0.5"
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-slate-200">
+                          Exclude Environment / Junk Files
+                        </span>
+                        <span className="text-[10px] text-slate-400 leading-normal block">
+                          Filters out local development noise (node_modules, .git, .DS_Store) to keep the cloud deployment bundle safe, optimized, and small.
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDeployPermissionModal(false);
+                        setPendingDeploymentFiles(null);
+                      }}
+                      className="flex-1 py-2.5 bg-[#141418] hover:bg-slate-900 text-slate-400 border border-white/5 rounded-xl text-xs font-semibold transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmAndStartVercelDeployment}
+                      className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-500/15 transition"
+                    >
+                      Approve & Deploy Live
+                    </button>
+                  </div>
                 </motion.div>
               </div>
             )}

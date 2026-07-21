@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  TrendingUp, CheckCircle2, Database, FileText, HardDrive, Globe, Trash2, Plus, AlertCircle, ExternalLink, RefreshCw, Layers, ShieldAlert, BadgeInfo
+  TrendingUp, CheckCircle2, Database, FileText, HardDrive, Globe, Trash2, Plus, AlertCircle, ExternalLink, RefreshCw, Layers, ShieldAlert, BadgeInfo,
+  History, Clock, Calendar, Terminal, X, ChevronDown, ChevronUp, Check
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -27,6 +28,29 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
   const [newDomainName, setNewDomainName] = useState('');
   const [domainLoading, setDomainLoading] = useState(false);
   const [domainError, setDomainError] = useState<string | null>(null);
+
+  // History tracking states
+  const [deployHistory, setDeployHistory] = useState<any[]>([]);
+  const [repoHistory, setRepoHistory] = useState<any[]>([]);
+  const [selectedLogsEntry, setSelectedLogsEntry] = useState<any | null>(null);
+  const [showAllDeploymentsModal, setShowAllDeploymentsModal] = useState(false);
+  const [logsExpandedEntryId, setLogsExpandedEntryId] = useState<string | null>(null);
+
+  // Load local storage history on mount
+  useEffect(() => {
+    try {
+      const deployStored = localStorage.getItem('repostnow_deployment_history');
+      if (deployStored) {
+        setDeployHistory(JSON.parse(deployStored));
+      }
+      const repoStored = localStorage.getItem('repostnow_repo_history');
+      if (repoStored) {
+        setRepoHistory(JSON.parse(repoStored));
+      }
+    } catch (e) {
+      console.error('Failed to parse history:', e);
+    }
+  }, []);
 
   const [totalQueries, setTotalQueries] = useState(() => {
     return Number(localStorage.getItem('repostnow_queries_count') || '148');
@@ -720,6 +744,147 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
         </div>
       </div>
 
+      {/* HISTORIES: DEPLOYMENTS & REPOSITORIES */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* COLUMN 1: DEPLOYMENT LOGS HISTORY */}
+        <div className="bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl flex flex-col justify-between space-y-4">
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <History className="w-5 h-5 text-indigo-400" />
+              <span>Riwayat Deploy Vercel</span>
+            </h3>
+            <p className="text-slate-500 text-xs">Menampilkan 3 deploy terbaru beserta log lengkap pipeline build.</p>
+          </div>
+
+          <div className="flex-1 space-y-3">
+            {deployHistory.length === 0 ? (
+              <div className="py-8 text-center text-slate-500 border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center space-y-2">
+                <Terminal className="w-8 h-8 text-slate-600 opacity-50" />
+                <p className="text-xs text-slate-400">Belum ada riwayat deployment.</p>
+              </div>
+            ) : (
+              deployHistory.slice(0, 3).map((item) => (
+                <div key={item.id} className="bg-[#0C0C0F] border border-white/5 rounded-xl p-4 space-y-3 text-left">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-amber-500">PROJECT DEPLOY</span>
+                      <h4 className="text-xs font-bold text-slate-200 mt-0.5">{item.projectName}</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                        item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                      }`}>
+                        {item.status === 'success' ? 'SUCCESS' : 'FAILED'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-[10px] font-mono text-slate-500">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                      {item.timestamp}
+                    </span>
+                    {item.url && (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        referrerPolicy="no-referrer"
+                        className="flex items-center gap-1 text-indigo-400 hover:underline"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Live Link
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Inline quick-toggle to see last 3 log statements */}
+                  <div className="space-y-1.5">
+                    <button
+                      onClick={() => setLogsExpandedEntryId(logsExpandedEntryId === item.id ? null : item.id)}
+                      className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-slate-200"
+                    >
+                      <span>{logsExpandedEntryId === item.id ? 'Sembunyikan Logs' : 'Lihat Logs Terbaru'}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${logsExpandedEntryId === item.id ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {logsExpandedEntryId === item.id && (
+                      <div className="bg-slate-950 rounded-lg p-3 font-mono text-[10px] text-slate-300 border border-white/5 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                        {item.logs && item.logs.length > 0 ? (
+                          item.logs.map((log: string, lIdx: number) => (
+                            <div key={lIdx} className="truncate select-text">
+                              {log}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-slate-500 italic">Tidak ada log tercatat.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {deployHistory.length > 0 && (
+            <button
+              onClick={() => setShowAllDeploymentsModal(true)}
+              className="w-full py-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 hover:text-indigo-300 font-bold border border-indigo-500/10 rounded-xl text-xs transition"
+            >
+              Lihat Semua Log Deploy ({deployHistory.length})
+            </button>
+          )}
+        </div>
+
+        {/* COLUMN 2: REPOSITORY ADDITIONS HISTORY */}
+        <div className="bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl flex flex-col justify-between space-y-4">
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <History className="w-5 h-5 text-emerald-400" />
+              <span>Riwayat Penambahan Repos</span>
+            </h3>
+            <p className="text-slate-500 text-xs">Menampilkan daftar repositori yang baru ditambahkan atau di-push.</p>
+          </div>
+
+          <div className="flex-1 space-y-3 overflow-y-auto max-h-[360px] custom-scrollbar pr-1">
+            {repoHistory.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center space-y-2">
+                <Database className="w-8 h-8 text-slate-600 opacity-50" />
+                <p className="text-xs text-slate-400">Belum ada riwayat penambahan repositori.</p>
+              </div>
+            ) : (
+              repoHistory.map((item) => (
+                <div key={item.id} className="bg-[#0C0C0F] border border-white/5 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-xs font-bold text-slate-200">{item.repoName}</h4>
+                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
+                        item.isPrivate ? 'bg-red-500/10 text-red-400 border border-red-500/10' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10'
+                      }`}>
+                        {item.isPrivate ? 'PRIVATE' : 'PUBLIC'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400">Owner: @{item.owner}</p>
+                    <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500 mt-1">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5" />
+                        {item.timestamp}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right flex sm:flex-col items-start sm:items-end justify-between font-mono text-[10px]">
+                    <span className="text-slate-500">Staged Push files:</span>
+                    <span className="text-indigo-400 font-bold sm:mt-0.5">{item.filesCount} assets</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* SECURE DIRECT browser pipelines info */}
       <div className="bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl space-y-4">
         <div>
@@ -732,6 +897,103 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
           </p>
         </div>
       </div>
+
+      {/* FULL SCREEN / MODAL POPUP FOR ALL DEPLOYMENT LOGS */}
+      {showAllDeploymentsModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div
+            onClick={() => setShowAllDeploymentsModal(false)}
+            className="absolute inset-0 bg-black/85 backdrop-blur-md"
+          />
+          <div className="relative w-full max-w-3xl max-h-[85vh] bg-[#0F0F12] border border-white/10 rounded-2xl flex flex-col shadow-2xl z-10 overflow-hidden text-left font-sans">
+            {/* Modal Header */}
+            <div className="p-4 bg-[#141418] border-b border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100">Semua Log & Riwayat Deployment</h3>
+                  <p className="text-xs text-slate-400">Arsip lengkap performa kompilasi pipeline cloud studio</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAllDeploymentsModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar bg-[#09090B]">
+              {deployHistory.map((item) => (
+                <div key={item.id} className="bg-[#121216] border border-white/5 rounded-xl p-4.5 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="text-[9px] uppercase font-mono font-bold tracking-widest text-amber-500 block">Vercel Build Environment</span>
+                      <h4 className="text-sm font-bold text-slate-200 mt-0.5">{item.projectName}</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        {item.timestamp}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                        item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                      }`}>
+                        {item.status === 'success' ? 'SUCCESS' : 'FAILED'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {item.url && (
+                    <div className="text-[10px] font-mono text-indigo-400">
+                      <span>Live CDN:</span>{' '}
+                      <a href={item.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                        {item.url}
+                      </a>
+                    </div>
+                  )}
+
+                  {/* Log statements */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Kompilasi Pipeline Output:</span>
+                    <div className="bg-black/80 rounded-xl p-4 font-mono text-[11px] leading-5 text-indigo-200 border border-white/5 max-h-48 overflow-y-auto custom-scrollbar select-text">
+                      {item.logs && item.logs.length > 0 ? (
+                        item.logs.map((log: string, lIdx: number) => (
+                          <div key={lIdx} className="whitespace-pre-wrap truncate">
+                            {log}
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-slate-500 italic">Tidak ada output log tercatat.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-[#141418] border-t border-white/5 flex items-center justify-between font-mono text-[10px] text-slate-500">
+              <span>Arsip tersimpan aman di browser sandbox lokal Anda</span>
+              <button
+                onClick={() => {
+                  if (confirm('Apakah Anda yakin ingin menghapus semua riwayat logs deployment?')) {
+                    localStorage.removeItem('repostnow_deployment_history');
+                    setDeployHistory([]);
+                    setShowAllDeploymentsModal(false);
+                  }
+                }}
+                className="text-red-400 hover:text-red-300 font-bold transition hover:underline"
+              >
+                Hapus Semua Log
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

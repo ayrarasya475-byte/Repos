@@ -338,6 +338,25 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
           },
         }
       );
+
+      // Save successful push to Repository Addition History
+      try {
+        const stored = localStorage.getItem('repostnow_repo_history');
+        const history = stored ? JSON.parse(stored) : [];
+        const newEntry = {
+          id: crypto.randomUUID(),
+          repoName: activeRepoName,
+          owner: activeOwner,
+          mode: repoConfig.mode,
+          isPrivate: repoConfig.isPrivate,
+          timestamp: new Date().toLocaleString(),
+          filesCount: filesToUpload.length,
+          status: 'success'
+        };
+        localStorage.setItem('repostnow_repo_history', JSON.stringify([newEntry, ...history].slice(0, 25)));
+      } catch (histErr) {
+        console.error('Failed to save repository history:', histErr);
+      }
     } catch (err: any) {
       console.error(err);
       setSession((prev) => ({

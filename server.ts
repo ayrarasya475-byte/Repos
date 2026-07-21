@@ -90,16 +90,44 @@ async function startServer() {
       const googleAi = getAI();
       
       // Map message history cleanly:
-      // Translate 'assistant' to 'model' for Gemini SDK, filter out system roles
-      const contents = messages
-        .filter((m: any) => m.role !== 'system')
-        .map((m: any) => ({
-          role: m.role === 'user' ? 'user' : 'model',
-          parts: [{ text: m.content }]
-        }));
+      // Translate 'assistant' to 'model' for Gemini SDK, filter out system roles.
+      // Crucial: Merge consecutive turns with the same role and remove empty turns
+      // to comply with Gemini's strict alternating turn-taking constraint.
+      const contents: any[] = [];
+      for (const m of messages) {
+        if (!m || m.role === 'system') continue;
+        
+        const role = m.role === 'user' ? 'user' : 'model';
+        const text = (m.content || "").trim();
+        if (!text) continue; // Skip empty messages to prevent API crash
 
-      // Use the standard high-performance general task model
-      const modelName = "gemini-2.5-flash";
+        if (contents.length > 0 && contents[contents.length - 1].role === role) {
+          // Merge consecutive same-role turns
+          contents[contents.length - 1].parts[0].text += "\n\n" + text;
+        } else {
+          contents.push({
+            role: role,
+            parts: [{ text: text }]
+          });
+        }
+      }
+
+      // Ensure the history is not empty and starts with user
+      if (contents.length === 0) {
+        contents.push({
+          role: 'user',
+          parts: [{ text: 'Hello' }]
+        });
+      } else if (contents[0].role !== 'user') {
+        // If it somehow starts with model, insert a welcoming user message at the front
+        contents.unshift({
+          role: 'user',
+          parts: [{ text: 'Hello' }]
+        });
+      }
+
+      // Use the recommended standard high-performance model
+      const modelName = "gemini-3.5-flash";
 
       const result = await googleAi.models.generateContent({
         model: modelName,
@@ -119,18 +147,26 @@ async function startServer() {
     }
   });
 
-  // GitHub Proxy to fetch repo ZIP archives securely bypassing CORS
+  // GitHub Proxy to fetch repo ZIP archives securely bypassing CORS with strict anti-caching
   app.get('/api/proxy-github-zip', async (req, res) => {
     const { owner, repo, ref, token } = req.query;
     if (!owner || !repo || !ref || !token) {
       return res.status(400).json({ error: 'Missing required parameters: owner, repo, ref, token' });
     }
+
+    // Set strict anti-caching headers immediately
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     try {
       const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/zipball/${ref}`, {
         headers: {
           'Authorization': `token ${token}`,
           'Accept': 'application/vnd.github.v3+json',
           'User-Agent': 'RepostNow-App',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
         }
       });
       if (!response.ok) {
@@ -140,6 +176,34 @@ async function startServer() {
       const arrayBuffer = await response.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       res.send(buffer);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET: Vercel Deployments list for history tracking
+  app.get('/api/proxy-vercel-deployments-list', async (req, res) => {
+    const token = req.headers['x-vercel-token'];
+    const { projectId, limit } = req.query;
+    if (!token) {
+      return res.status(400).json({ error: 'Missing x-vercel-token header' });
+    }
+    try {
+      let url = 'https://api.vercel.com/v6/deployments';
+      const params = new URLSearchParams();
+      if (projectId) params.append('projectId', projectId as string);
+      if (limit) params.append('limit', limit as string);
+      
+      const queryString = params.toString();
+      if (queryString) url += `?${queryString}`;
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+      const data = await response.json();
+      res.status(response.status).json(data);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
