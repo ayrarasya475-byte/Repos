@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  TrendingUp, CheckCircle2, Database, FileText, HardDrive
+  TrendingUp, CheckCircle2, Database, FileText, HardDrive, Globe, Trash2, Plus, AlertCircle, ExternalLink, RefreshCw, Layers, ShieldAlert, BadgeInfo
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -8,19 +8,156 @@ import {
 } from 'recharts';
 import { UploadFile } from '../types';
 import { formatBytes } from './FileTree';
+import { safeStorage } from '../utils/storage';
 
 interface StatsDashboardProps {
   stagedFiles: UploadFile[];
 }
 
 export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
-  // Statistics States
-  const [totalQueries] = useState(() => {
+  const [vercelToken, setVercelToken] = useState(() => safeStorage.getItem('REPOSTNOW_VERCEL_TOKEN') || '');
+  const [projects, setProjects] = useState<any[]>([]);
+  const [vercelUser, setVercelUser] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Custom domains configuration state
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectDomains, setProjectDomains] = useState<{ [projectId: string]: any[] }>({});
+  const [newDomainName, setNewDomainName] = useState('');
+  const [domainLoading, setDomainLoading] = useState(false);
+  const [domainError, setDomainError] = useState<string | null>(null);
+
+  const [totalQueries, setTotalQueries] = useState(() => {
     return Number(localStorage.getItem('repostnow_queries_count') || '148');
   });
 
+  // Load Vercel status on mount or token change
+  useEffect(() => {
+    if (vercelToken) {
+      fetchVercelData();
+    }
+  }, [vercelToken]);
+
+  const fetchVercelData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // 1. Fetch user profile / limit information
+      const userRes = await fetch('/api/proxy-vercel-user', {
+        headers: { 'x-vercel-token': vercelToken }
+      });
+      if (userRes.ok) {
+        const userData = await userRes.json();
+        setVercelUser(userData.user || userData);
+      }
+
+      // 2. Fetch projects
+      const projRes = await fetch('/api/proxy-vercel-projects', {
+        headers: { 'x-vercel-token': vercelToken }
+      });
+      if (!projRes.ok) {
+        throw new Error(`Failed to fetch Vercel projects (HTTP ${projRes.status})`);
+      }
+      const projData = await projRes.json();
+      const projList = projData.projects || [];
+      setProjects(projList);
+
+      // 3. For each project, fetch its domains
+      for (const p of projList) {
+        fetchDomainsForProject(p.id);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to sync Vercel statistics.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchDomainsForProject = async (projId: string) => {
+    try {
+      const res = await fetch(`/api/proxy-vercel-projects/${projId}/domains`, {
+        headers: { 'x-vercel-token': vercelToken }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProjectDomains(prev => ({ ...prev, [projId]: data.domains || [] }));
+      }
+    } catch (e) {
+      console.error('Failed to load domains for project', projId, e);
+    }
+  };
+
+  const handleAddDomain = async (projId: string) => {
+    if (!newDomainName.trim()) return;
+    setDomainLoading(true);
+    setDomainError(null);
+    try {
+      const res = await fetch(`/api/proxy-vercel-projects/${projId}/domains`, {
+        method: 'POST',
+        headers: {
+          'x-vercel-token': vercelToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: newDomainName.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Failed to add custom domain');
+      }
+      setNewDomainName('');
+      await fetchDomainsForProject(projId);
+    } catch (err: any) {
+      setDomainError(err.message);
+    } finally {
+      setDomainLoading(false);
+    }
+  };
+
+  const handleDeleteDomain = async (projId: string, domainName: string) => {
+    if (!confirm(`Are you sure you want to delete domain "${domainName}"?`)) return;
+    try {
+      const res = await fetch(`/api/proxy-vercel-projects/${projId}/domains/${domainName}`, {
+        method: 'DELETE',
+        headers: { 'x-vercel-token': vercelToken }
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error?.message || 'Failed to delete domain');
+      }
+      await fetchDomainsForProject(projId);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleDeleteProject = async (projId: string, projName: string) => {
+    if (!confirm(`⚠️ DANGER: Are you sure you want to delete project "${projName}"? This deletes all associated deployments, custom domains, and cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/proxy-vercel-projects/${projId}`, {
+        method: 'DELETE',
+        headers: { 'x-vercel-token': vercelToken }
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error?.message || 'Failed to delete project');
+      }
+      setProjects(prev => prev.filter(p => p.id !== projId));
+      alert(`Project "${projName}" successfully deleted from Vercel.`);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleSaveTokenManually = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vercelToken.trim()) return;
+    safeStorage.setItem('REPOSTNOW_VERCEL_TOKEN', vercelToken.trim());
+    fetchVercelData();
+  };
+
   // Compute staged file types and sizes
-  const fileTypeDistribution = React.useMemo(() => {
+  const fileTypeDistribution = useMemo(() => {
     const distribution: { [key: string]: number } = {};
     stagedFiles.forEach(f => {
       const ext = f.name.split('.').pop()?.toLowerCase() || 'other';
@@ -31,7 +168,6 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
 
   const totalStagedSize = stagedFiles.reduce((acc, f) => acc + f.size, 0);
 
-  // Mock static historical charts
   const usageData = [
     { day: 'Mon', uploads: 4, aiQueries: 12, sizeKb: 240 },
     { day: 'Tue', uploads: 7, aiQueries: 19, sizeKb: 380 },
@@ -74,26 +210,233 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
 
         <div className="bg-[#141417] border border-white/5 rounded-2xl p-5 flex items-center justify-between shadow-lg">
           <div>
-            <p className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">AI Queries Triggered</p>
-            <h3 className="text-2xl font-black text-amber-400 mt-1 font-mono">{totalQueries}</h3>
-            <p className="text-[10px] text-slate-400 mt-0.5">Active tokens this month</p>
+            <p className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">Vercel Connected Projects</p>
+            <h3 className="text-2xl font-black text-amber-400 mt-1 font-mono">{projects.length}</h3>
+            <p className="text-[10px] text-slate-400 mt-0.5">Real-time Vercel sync</p>
           </div>
           <div className="p-3 bg-amber-500/10 rounded-xl text-amber-400 border border-amber-500/10">
-            <TrendingUp className="w-5 h-5" />
+            <Globe className="w-5 h-5" />
           </div>
         </div>
 
         <div className="bg-[#141417] border border-white/5 rounded-2xl p-5 flex items-center justify-between shadow-lg">
           <div>
-            <p className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">Security Integrity</p>
-            <span className="inline-block text-xs font-bold font-mono uppercase px-2.5 py-1 rounded-full mt-2 border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-              ● SECURE CLIENT
+            <p className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">Security Protection</p>
+            <span className="inline-block text-[10px] font-bold font-mono uppercase px-2.5 py-1 rounded-full mt-2 border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+              ● ANTI-DDOS & SQLI
             </span>
           </div>
-          <div className="p-3 bg-[#10b981]/10 rounded-xl text-[#10b981] border border-white/5">
+          <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-400 border border-white/5">
             <Database className="w-5 h-5" />
           </div>
         </div>
+      </div>
+
+      {/* VERCEL PRODUCTION DEPLOYMENTS SECTION */}
+      <div className="bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Globe className="w-5 h-5 text-indigo-400" />
+              <span>Real-Time Vercel Deployments & Domains</span>
+            </h3>
+            <p className="text-slate-500 text-xs mt-0.5">Configure live domains, delete staging environments, and view statistics directly from your Vercel pipeline.</p>
+          </div>
+
+          <button
+            onClick={fetchVercelData}
+            disabled={loading || !vercelToken}
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold rounded-lg border border-white/5 transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh Sync</span>
+          </button>
+        </div>
+
+        {!vercelToken ? (
+          <form onSubmit={handleSaveTokenManually} className="p-6 bg-slate-900/40 rounded-2xl border border-dashed border-white/10 flex flex-col items-center text-center space-y-4">
+            <ShieldAlert className="w-10 h-10 text-amber-500/80" />
+            <div className="max-w-md">
+              <h4 className="text-sm font-bold text-slate-200">Vercel API Integration Required</h4>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Connect your Vercel Token to view live projects, configure custom domains, delete test deployments, and see real-time limits.
+              </p>
+            </div>
+            <div className="flex w-full max-w-md gap-2">
+              <input
+                type="password"
+                placeholder="Enter Vercel User Token (Bearer)..."
+                value={vercelToken}
+                onChange={(e) => setVercelToken(e.target.value)}
+                className="flex-grow px-3.5 py-2 text-xs font-mono bg-black/60 border border-white/10 rounded-xl text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition flex-shrink-0"
+              >
+                Connect API
+              </button>
+            </div>
+          </form>
+        ) : loading && projects.length === 0 ? (
+          <div className="py-12 flex flex-col items-center justify-center space-y-3">
+            <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
+            <p className="text-xs text-slate-500">Querying active Vercel deployments and project statistics...</p>
+          </div>
+        ) : error ? (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl flex items-center gap-3 text-xs">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="py-12 text-center text-slate-500 border border-dashed border-white/5 rounded-2xl">
+            <Layers className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+            <p className="text-xs">No active Vercel projects found on this token account.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {projects.map((project) => {
+              const domains = projectDomains[project.id] || [];
+              const latestDeployment = project.latestDeployments?.[0];
+              const createdDate = new Date(project.createdAt).toLocaleString();
+              const updateDate = latestDeployment ? new Date(latestDeployment.createdAt).toLocaleString() : 'N/A';
+
+              return (
+                <div key={project.id} className="bg-[#0C0C0F] border border-white/5 hover:border-white/10 rounded-2xl p-5 flex flex-col justify-between transition group space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-left">
+                        <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-indigo-400">PROJECT</span>
+                        <h4 className="text-sm font-bold text-slate-100 mt-0.5">{project.name}</h4>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteProject(project.id, project.name)}
+                        className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg border border-red-500/10 transition opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        title="Delete project from Vercel"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[10px] font-mono p-2.5 bg-[#141417]/60 rounded-xl border border-white/5">
+                      <div>
+                        <span className="text-slate-500">Framework:</span>{' '}
+                        <span className="text-slate-300">{project.framework || 'Vite/SPA'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Node Version:</span>{' '}
+                        <span className="text-slate-300">{project.nodeVersion || '20.x'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Created:</span>{' '}
+                        <span className="text-slate-400 block truncate">{createdDate}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Last Deploy:</span>{' '}
+                        <span className="text-slate-400 block truncate">{updateDate}</span>
+                      </div>
+                    </div>
+
+                    {/* DOMAINS SECTION */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-slate-400">Domains ({domains.length})</span>
+                        <button
+                          onClick={() => setActiveProjectId(activeProjectId === project.id ? null : project.id)}
+                          className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+                        >
+                          {activeProjectId === project.id ? 'Close' : '+ Add Domain'}
+                        </button>
+                      </div>
+
+                      {activeProjectId === project.id && (
+                        <div className="space-y-2 p-3 bg-[#141417]/80 rounded-xl border border-white/5">
+                          <p className="text-[10px] text-slate-400">Specify domain name (e.g. static-demo.vercel.app):</p>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="domain.com"
+                              value={newDomainName}
+                              onChange={(e) => setNewDomainName(e.target.value)}
+                              className="flex-grow px-2 py-1 bg-black/60 border border-white/10 rounded-lg text-xs text-slate-200 font-mono"
+                            />
+                            <button
+                              onClick={() => handleAddDomain(project.id)}
+                              disabled={domainLoading}
+                              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition"
+                            >
+                              Add
+                            </button>
+                          </div>
+                          {domainError && <p className="text-[9px] text-red-400 font-mono">{domainError}</p>}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {domains.map((d: any) => (
+                          <div key={d.name} className="flex items-center gap-1.5 px-2 py-1 bg-[#141417] border border-white/5 rounded-lg text-[10px] font-mono text-slate-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            <a
+                              href={`https://${d.name}`}
+                              target="_blank"
+                              referrerPolicy="no-referrer"
+                              className="hover:underline flex items-center gap-1"
+                            >
+                              <span>{d.name}</span>
+                              <ExternalLink className="w-2.5 h-2.5 text-slate-500" />
+                            </a>
+                            <button
+                              onClick={() => handleDeleteDomain(project.id, d.name)}
+                              className="text-red-500 hover:text-red-400 font-bold ml-1.5"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {latestDeployment && (
+                    <div className="pt-3 border-t border-white/5 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${latestDeployment.status === 'READY' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+                        <span className="text-[10px] text-slate-400 font-mono">Status: {latestDeployment.status}</span>
+                      </div>
+                      <a
+                        href={`https://${latestDeployment.url}`}
+                        target="_blank"
+                        referrerPolicy="no-referrer"
+                        className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold"
+                      >
+                        <span>View Live</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Vercel user Limits block */}
+        {vercelUser && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-4 border-t border-white/5">
+            <div className="p-3 bg-black/30 border border-white/5 rounded-xl text-[10px] font-mono text-left">
+              <span className="text-slate-500 uppercase block">Vercel User:</span>
+              <span className="text-slate-300 font-bold mt-0.5 block">{vercelUser.username || vercelUser.name || 'Personal Account'}</span>
+            </div>
+            <div className="p-3 bg-black/30 border border-white/5 rounded-xl text-[10px] font-mono text-left">
+              <span className="text-slate-500 uppercase block">Billing Plan:</span>
+              <span className="text-slate-300 font-bold mt-0.5 block capitalize">{vercelUser.billing?.plan || 'Hobby / Free Tier'}</span>
+            </div>
+            <div className="p-3 bg-black/30 border border-white/5 rounded-xl text-[10px] font-mono text-left">
+              <span className="text-slate-500 uppercase block">Projects Limit:</span>
+              <span className="text-slate-300 font-bold mt-0.5 block">Unlimited / Soft limit (Hobby)</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Charts area */}
@@ -169,7 +512,7 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[10px] font-mono max-h-24 overflow-y-auto custom-scrollbar">
+              <div className="grid grid-cols-2 gap-2 text-[10px] font-mono max-h-24 overflow-y-auto custom-scrollbar text-left">
                 {fileTypeDistribution.map((entry, idx) => (
                   <div key={entry.name} className="flex items-center gap-1.5 truncate p-1 bg-[#0A0A0B]/60 rounded border border-white/5">
                     <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />

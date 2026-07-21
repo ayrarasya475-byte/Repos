@@ -26,11 +26,71 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'ai' | 'stats'>('dashboard');
 
+  const [accounts, setAccounts] = useState<Array<{ token: string; user: GitHubUser }>>(() => {
+    try {
+      const stored = safeStorage.getItem('repostnow_linked_accounts');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Sync accounts to localStorage
+  useEffect(() => {
+    safeStorage.setItem('repostnow_linked_accounts', JSON.stringify(accounts));
+  }, [accounts]);
+
+  const addAccountLink = useCallback((tokenVal: string, userVal: GitHubUser) => {
+    setAccounts(prev => {
+      const exists = prev.some(acc => acc.user.login.toLowerCase() === userVal.login.toLowerCase());
+      if (exists) {
+        return prev.map(acc => acc.user.login.toLowerCase() === userVal.login.toLowerCase() ? { token: tokenVal, user: userVal } : acc);
+      }
+      if (prev.length >= 3) {
+        alert('You can link up to 3 GitHub accounts maximum. Please remove an account link first.');
+        return prev;
+      }
+      return [...prev, { token: tokenVal, user: userVal }];
+    });
+  }, []);
+
+  const handleSwitchAccount = useCallback((targetToken: string) => {
+    const acc = accounts.find(a => a.token === targetToken);
+    if (acc) {
+      setToken(targetToken);
+      setUser(acc.user);
+      safeStorage.setItem(STORAGE_KEY, targetToken);
+    }
+  }, [accounts]);
+
+  const handleRemoveAccount = useCallback((login: string) => {
+    setAccounts(prev => {
+      const filtered = prev.filter(a => a.user.login.toLowerCase() !== login.toLowerCase());
+      if (user?.login.toLowerCase() === login.toLowerCase()) {
+        if (filtered.length > 0) {
+          setToken(filtered[0].token);
+          setUser(filtered[0].user);
+          safeStorage.setItem(STORAGE_KEY, filtered[0].token);
+        } else {
+          // Disconnect completely if no other accounts
+          setToken('');
+          setUser(null);
+          setRepos([]);
+          setOrgs([]);
+          safeStorage.removeItem(STORAGE_KEY);
+          setFiles([]);
+        }
+      }
+      return filtered;
+    });
+  }, [user]);
+
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   // Files currently staged
   const [files, setFiles] = useState<UploadFile[]>([]);
+  const [unpackZip, setUnpackZip] = useState<boolean>(true);
   
   // Repo configuration from components
   const [repoConfig, setRepoConfig] = useState<RepoConfig | null>(null);
@@ -68,6 +128,7 @@ export default function App() {
       setUser(gitUser);
       setToken(newToken);
       safeStorage.setItem(STORAGE_KEY, newToken);
+      addAccountLink(newToken, gitUser);
 
       // Fetch user repos & orgs
       await handleRefreshRepos(newToken);
@@ -78,7 +139,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [handleRefreshRepos]);
+  }, [handleRefreshRepos, addAccountLink]);
 
   // Run on mount to check if token exists
   useEffect(() => {
@@ -103,7 +164,7 @@ export default function App() {
   // Add files to staging, avoiding duplicates based on relative path
   const handleFilesSelected = async (rawFiles: UploadFile[]) => {
     try {
-      const newFiles = await processSelectedFiles(rawFiles);
+      const newFiles = await processSelectedFiles(rawFiles, unpackZip);
       setFiles((prev) => {
         const merged = [...prev];
         newFiles.forEach((newFile) => {
@@ -297,19 +358,19 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
               <TrendingUp className="w-4 h-4" />
               <span>Analytics & Stats</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'settings' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
+            >
+              <Sliders className="w-4 h-4" />
+              <span>Settings & Repos Config</span>
+            </button>
           </div>
         </div>
 
         {/* Bottom Sidebar Action & Profile */}
         <div className="space-y-4 pt-4 border-t border-white/5">
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white transition border border-transparent text-left"
-          >
-            <Sliders className="w-4 h-4 text-slate-400" />
-            <span>Workspace Settings</span>
-          </button>
-
           {user && (
             <div className="flex items-center gap-2.5 px-3 py-2 bg-[#121215] border border-white/5 rounded-xl text-xs font-mono text-slate-300">
               <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0" />
@@ -329,8 +390,8 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-1.5 text-slate-400 hover:text-white bg-white/5 rounded-lg border border-white/5"
+            onClick={() => setActiveTab('settings')}
+            className={`p-1.5 rounded-lg border transition ${activeTab === 'settings' ? 'text-indigo-400 border-indigo-500/25 bg-indigo-500/10' : 'text-slate-400 hover:text-white bg-white/5 border-white/5'}`}
             title="Open settings"
           >
             <Sliders className="w-4 h-4" />
@@ -409,6 +470,8 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                       <FolderDropzone
                         onFilesSelected={handleFilesSelected}
                         disabled={isUploading}
+                        unpackZip={unpackZip}
+                        onToggleUnpackZip={() => setUnpackZip(prev => !prev)}
                       />
 
                       <FileTree
@@ -486,6 +549,33 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                     />
                   </motion.div>
                 )}
+
+                {/* 4. INLINE WORKSPACE SETTINGS & REPOS CONFIG VIEW */}
+                {activeTab === 'settings' && (
+                  <motion.div
+                    key="settings-inline"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    className="h-[82vh] md:h-[86vh] flex flex-col"
+                  >
+                    <SettingsPanel
+                      isOpen={true}
+                      isInline={true}
+                      onClose={() => setActiveTab('dashboard')}
+                      token={token}
+                      user={user}
+                      repos={repos}
+                      stagedFiles={files}
+                      onConnectToken={handleConnectToken}
+                      onDisconnect={handleDisconnect}
+                      onRefreshRepos={handleRefreshRepos}
+                      accounts={accounts}
+                      onSwitchAccount={handleSwitchAccount}
+                      onRemoveAccount={handleRemoveAccount}
+                    />
+                  </motion.div>
+                )}
               </div>
             )}
           </AnimatePresence>
@@ -524,8 +614,8 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
         </button>
 
         <button
-          onClick={() => setIsSettingsOpen(true)}
-          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition text-slate-400`}
+          onClick={() => setActiveTab('settings')}
+          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'settings' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
         >
           <Sliders className="w-5 h-5" />
           <span className="text-[10px] mt-1 font-mono">Settings</span>
@@ -543,6 +633,9 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
         onConnectToken={handleConnectToken}
         onDisconnect={handleDisconnect}
         onRefreshRepos={handleRefreshRepos}
+        accounts={accounts}
+        onSwitchAccount={handleSwitchAccount}
+        onRemoveAccount={handleRemoveAccount}
       />
     </div>
   );

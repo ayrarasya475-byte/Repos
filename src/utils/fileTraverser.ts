@@ -90,15 +90,15 @@ export async function extractZipFile(zipUploadFile: UploadFile): Promise<UploadF
 }
 
 /**
- * Checks a list of selected files and extracts any files that are ZIP files.
+ * Checks a list of selected files and extracts any files that are ZIP files if unpackZip is enabled.
  * Returns a flattened array of non-ZIP files and extracted files.
  */
-export async function processSelectedFiles(files: UploadFile[]): Promise<UploadFile[]> {
+export async function processSelectedFiles(files: UploadFile[], unpackZip: boolean = true): Promise<UploadFile[]> {
   const processed: UploadFile[] = [];
   
   for (const file of files) {
     const isZip = file.name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
-    if (isZip) {
+    if (isZip && unpackZip) {
       try {
         const extracted = await extractZipFile(file);
         processed.push(...extracted);

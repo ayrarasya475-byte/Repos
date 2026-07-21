@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { GitHubUser, GitHubRepo, UploadFile } from '../types';
 import {
-  fetchRepoContents, deleteRepository, deleteFileFromRepo, uploadSingleFileToRepo, fileToBase64, wipeRepositoryContents, deleteDirectoryFromRepo
+  fetchRepoContents, deleteRepository, deleteFileFromRepo, uploadSingleFileToRepo, fileToBase64, wipeRepositoryContents, deleteDirectoryFromRepo, updateRepository, renameFileInRepo
 } from '../utils/github';
 import {
   getFirebaseConfig, loginWithGitHubViaFirebase
@@ -17,8 +17,8 @@ import JSZip from 'jszip';
 import { safeStorage } from '../utils/storage';
 
 interface SettingsPanelProps {
-  isOpen: boolean;
-  onClose: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
   token: string;
   user: GitHubUser | null;
   repos: GitHubRepo[];
@@ -26,9 +26,13 @@ interface SettingsPanelProps {
   onConnectToken: (newToken: string) => void;
   onDisconnect: () => void;
   onRefreshRepos: () => void;
+  isInline?: boolean;
+  accounts?: Array<{ token: string; user: GitHubUser }>;
+  onSwitchAccount?: (token: string) => void;
+  onRemoveAccount?: (login: string) => void;
 }
 
-type ScreenType = 'home' | 'auth' | 'repos' | 'repo-detail' | 'deploy' | 'profile';
+type ScreenType = 'home' | 'auth' | 'repos' | 'repo-detail' | 'deploy' | 'profile' | 'repo-config';
 
 export default function SettingsPanel({
   isOpen,
@@ -39,7 +43,11 @@ export default function SettingsPanel({
   stagedFiles,
   onConnectToken,
   onDisconnect,
-  onRefreshRepos
+  onRefreshRepos,
+  isInline = false,
+  accounts = [],
+  onSwitchAccount,
+  onRemoveAccount
 }: SettingsPanelProps) {
   // Navigation screen
   const [screen, setScreen] = useState<ScreenType>('home');
@@ -90,6 +98,16 @@ export default function SettingsPanel({
   // Manual Zip Deployment state
   const [deployZipFile, setDeployZipFile] = useState<File | null>(null);
 
+  // Repository configuration states
+  const [configRepo, setConfigRepo] = useState<GitHubRepo | null>(null);
+  const [newRepoName, setNewRepoName] = useState('');
+  const [isRepoPrivate, setIsRepoPrivate] = useState(false);
+  const [repoUpdating, setRepoUpdating] = useState(false);
+  const [renameOldPath, setRenameOldPath] = useState('');
+  const [renameNewPath, setRenameNewPath] = useState('');
+  const [fileRenaming, setFileRenaming] = useState(false);
+  const [selectedFileToDeploy, setSelectedFileToDeploy] = useState<any | null>(null);
+
   // Load configuration from localStorage on mount/open
   useEffect(() => {
     setInputToken(token);
@@ -102,8 +120,30 @@ export default function SettingsPanel({
       setDeployStatus('idle');
       setDeployError(null);
       setSelectedRepo(null);
+      setConfigRepo(null);
     }
   }, [token, isOpen]);
+
+  const [configRepoFiles, setConfigRepoFiles] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (screen === 'repo-config' && configRepo) {
+      setLoading(true);
+      fetchRepoContents(token, configRepo.owner?.login || '', configRepo.name, '', configRepo.default_branch || 'main')
+        .then(res => {
+          if (Array.isArray(res)) {
+            setConfigRepoFiles(res);
+          } else {
+            setConfigRepoFiles([]);
+          }
+        })
+        .catch(err => {
+          console.error('Error fetching repo files for config:', err);
+          setConfigRepoFiles([]);
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [screen, configRepo, token]);
 
   // Handle Token-based login submit
   const handleTokenSubmit = async (e: React.FormEvent) => {
@@ -269,6 +309,48 @@ export default function SettingsPanel({
     }
   };
 
+  // Update repository settings (name & privacy)
+  const handleUpdateRepoSettings = async () => {
+    if (!configRepo) return;
+    setRepoUpdating(true);
+    try {
+      await updateRepository(token, configRepo.owner?.login || '', configRepo.name, {
+        name: newRepoName.trim(),
+        private: isRepoPrivate,
+      });
+      alert('Repository updated successfully!');
+      onRefreshRepos();
+      setScreen('repos');
+    } catch (err: any) {
+      alert(`Failed to update repository: ${err.message}`);
+    } finally {
+      setRepoUpdating(false);
+    }
+  };
+
+  // Rename a file in the repository
+  const handleRenameFileInRepo = async () => {
+    if (!configRepo || !renameOldPath.trim() || !renameNewPath.trim()) return;
+    setFileRenaming(true);
+    try {
+      await renameFileInRepo(
+        token,
+        configRepo.owner?.login || '',
+        configRepo.name,
+        renameOldPath.trim(),
+        renameNewPath.trim(),
+        configRepo.default_branch || 'main'
+      );
+      alert(`Successfully renamed file from "${renameOldPath}" to "${renameNewPath}"!`);
+      setRenameOldPath('');
+      setRenameNewPath('');
+    } catch (err: any) {
+      alert(`Failed to rename file: ${err.message}`);
+    } finally {
+      setFileRenaming(false);
+    }
+  };
+
   // Save the repository file inline edit
   const handleSaveRepoFile = async () => {
     if (!selectedRepo || !editingRepoFile) return;
@@ -367,8 +449,39 @@ export default function SettingsPanel({
     safeStorage.setItem('REPOSTNOW_VERCEL_TOKEN', tokenValue.trim());
   };
 
+  // Helper to compute SHA-1 hash and size of a file (highly compatible, native Web Crypto API)
+  const computeSHA1 = async (bytes: Uint8Array): Promise<{ sha: string; size: number }> => {
+    const hashBuffer = await crypto.subtle.digest('SHA-1', bytes);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const sha = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return { sha, size: bytes.length };
+  };
+
+  const cleanFilePath = (filePath: string): string => {
+    let clean = filePath.replace(/\\/g, '/');
+    if (clean.startsWith('./')) {
+      clean = clean.substring(2);
+    }
+    if (clean.startsWith('/')) {
+      clean = clean.substring(1);
+    }
+    return clean;
+  };
+
+  const isIgnoredFile = (filePath: string): boolean => {
+    const clean = cleanFilePath(filePath).toLowerCase();
+    return (
+      clean.includes('node_modules/') ||
+      clean.includes('.git/') ||
+      clean.includes('.github/') ||
+      clean.endsWith('.ds_store') ||
+      clean === 'node_modules' ||
+      clean === '.git'
+    );
+  };
+
   // Vercel Deployment Core Handler
-  const executeVercelDeployment = async (filesList: Array<{ file: string, data: string }>) => {
+  const executeVercelDeployment = async (filesList: Array<{ file: string; data: Uint8Array }>) => {
     if (!vercelToken) {
       setDeployError('Vercel API Token is required. Please save it in credentials configuration first.');
       setDeployStatus('error');
@@ -387,22 +500,90 @@ export default function SettingsPanel({
     };
 
     addLog('🚀 Initiating Vercel Instant Deployment Pipeline...');
-    addLog(`📦 Bundled ${filesList.length} source file(s) for compilation.`);
-    addLog('📡 Sending deployment payload structure to Vercel global edge...');
+    addLog(`📦 Preparing metrics and hashing ${filesList.length} source file(s) for compilation...`);
 
     try {
+      const processedFiles: Array<{ file: string; sha: string; size: number; data: Uint8Array }> = [];
+      
+      for (const item of filesList) {
+        const cleanPath = cleanFilePath(item.file);
+        if (isIgnoredFile(cleanPath)) {
+          continue;
+        }
+        const { sha, size } = await computeSHA1(item.data);
+        processedFiles.push({
+          file: cleanPath,
+          sha,
+          size,
+          data: item.data,
+        });
+      }
+
+      if (processedFiles.length === 0) {
+        throw new Error('No deployable files found (all source files were either empty or ignored).');
+      }
+
+      addLog(`🔍 Filtered down to ${processedFiles.length} deployment assets. Staging onto Vercel File Store...`);
+
+      let uploadedCount = 0;
+      const concurrencyLimit = 5;
+      const chunks: typeof processedFiles[] = [];
+      for (let i = 0; i < processedFiles.length; i += concurrencyLimit) {
+        chunks.push(processedFiles.slice(i, i + concurrencyLimit));
+      }
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        await Promise.all(
+          chunk.map(async (item) => {
+            try {
+              const res = await fetch('/api/proxy-vercel-file', {
+                method: 'POST',
+                headers: {
+                  'x-vercel-token': vercelToken,
+                  'Content-Type': 'application/octet-stream',
+                  'x-now-digest': item.sha,
+                  'x-now-size': String(item.size),
+                },
+                body: item.data,
+              });
+
+              if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Upload failed for ${item.file}: ${errText}`);
+              }
+              uploadedCount++;
+            } catch (err: any) {
+              throw new Error(`Failed to stage file "${item.file}": ${err.message}`);
+            }
+          })
+        );
+
+        const progress = Math.round((uploadedCount / processedFiles.length) * 100);
+        addLog(`📤 Staged ${uploadedCount}/${processedFiles.length} files (${progress}% complete)`);
+      }
+
+      addLog('📡 Sending final deployment schema payload to Vercel global edge...');
+
+      const filesPayload = processedFiles.map((item) => ({
+        file: item.file,
+        sha: item.sha,
+        size: item.size,
+        mode: 33188, // 100644 (standard file permissions)
+      }));
+
       const payload = {
         name: vercelProjectName.trim() || 'repostnow-app',
-        files: filesList,
+        files: filesPayload,
         projectSettings: {
-          framework: null
-        }
+          framework: null,
+        },
       };
 
-      const res = await fetch('https://api.vercel.com/v13/deployments', {
+      const res = await fetch('/api/proxy-vercel-deployments', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${vercelToken}`,
+          'x-vercel-token': vercelToken,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
@@ -417,7 +598,7 @@ export default function SettingsPanel({
       const initialUrl = data.url;
       const initialUrlFormatted = `https://${initialUrl}`;
       
-      addLog(`✨ Deployment created on Vercel Edge.`);
+      addLog(`✨ Deployment created successfully on Vercel Edge.`);
       addLog(`🆔 Deployment ID: ${deploymentId}`);
       addLog(`🌐 Target Live URL: ${initialUrlFormatted}`);
       addLog(`🔍 Starting live pipeline status tracking...`);
@@ -441,13 +622,13 @@ export default function SettingsPanel({
 
       while (!finished && attempts < maxAttempts) {
         attempts++;
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
         try {
-          const pollRes = await fetch(`https://api.vercel.com/v13/deployments/${deploymentId}`, {
+          const pollRes = await fetch(`/api/proxy-vercel-poll/${deploymentId}`, {
             headers: {
-              'Authorization': `Bearer ${vercelToken}`
-            }
+              'x-vercel-token': vercelToken,
+            },
           });
 
           if (!pollRes.ok) {
@@ -516,13 +697,16 @@ export default function SettingsPanel({
     }
 
     setDeployStatus('packing');
+    setDeployError(null);
+    setDeployedUrl(null);
+    setDeployLogs([]);
     try {
-      const filesList: Array<{ file: string, data: string }> = [];
+      const filesList: Array<{ file: string; data: Uint8Array }> = [];
       for (const staged of stagedFiles) {
-        const text = await staged.file.text();
+        const arrayBuffer = await staged.file.arrayBuffer();
         filesList.push({
           file: staged.path,
-          data: text
+          data: new Uint8Array(arrayBuffer)
         });
       }
       await executeVercelDeployment(filesList);
@@ -536,27 +720,34 @@ export default function SettingsPanel({
   const handleDeployRepoToVercel = async (repo: GitHubRepo) => {
     setDeployStatus('packing');
     setDeployError(null);
+    setDeployedUrl(null);
+    setDeployLogs([]);
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      const timestamp = new Date().toLocaleTimeString();
+      logs.push(`[${timestamp}] ${msg}`);
+      setDeployLogs([...logs]);
+    };
+
+    addLog(`📥 Fetching latest files from GitHub repository: ${repo.name}...`);
     try {
-      // Download repository zip ball directly from GitHub
+      // Download repository zip ball via backend proxy to bypass CORS
       const ref = repo.default_branch || 'main';
-      const response = await fetch(`https://api.github.com/repos/${repo.owner?.login}/${repo.name}/zipball/${ref}`, {
-        headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/vnd.github.v3+json',
-        }
-      });
+      const ownerName = repo.owner?.login || '';
+      const response = await fetch(`/api/proxy-github-zip?owner=${encodeURIComponent(ownerName)}&repo=${encodeURIComponent(repo.name)}&ref=${encodeURIComponent(ref)}&token=${encodeURIComponent(token)}`);
 
       if (!response.ok) {
         throw new Error(`Failed to download repository files from GitHub (HTTP ${response.status})`);
       }
 
+      addLog(`📦 Extracting archive zip file structure...`);
       const zipBlob = await response.blob();
       const zip = await JSZip.loadAsync(zipBlob);
-      const filesList: Array<{ file: string, data: string }> = [];
+      const filesList: Array<{ file: string; data: Uint8Array }> = [];
 
       for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
         if (!zipEntry.dir) {
-          const content = await zipEntry.async('string');
+          const content = await zipEntry.async('uint8array');
           // GitHub zipballs embed everything in a sub-folder. We strip the root folder name.
           const segments = relativePath.split('/');
           segments.shift();
@@ -574,6 +765,7 @@ export default function SettingsPanel({
         throw new Error('Downloaded repository zip was empty or could not be decoded.');
       }
 
+      addLog(`✨ Extraction completed. Processing ${filesList.length} files...`);
       await executeVercelDeployment(filesList);
     } catch (err: any) {
       setDeployError(err.message || 'Failed to download and package GitHub repository.');
@@ -588,13 +780,23 @@ export default function SettingsPanel({
 
     setDeployStatus('packing');
     setDeployError(null);
+    setDeployedUrl(null);
+    setDeployLogs([]);
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      const timestamp = new Date().toLocaleTimeString();
+      logs.push(`[${timestamp}] ${msg}`);
+      setDeployLogs([...logs]);
+    };
+
+    addLog(`📦 Parsing local ZIP package: ${file.name}...`);
     try {
       const zip = await JSZip.loadAsync(file);
-      const filesList: Array<{ file: string, data: string }> = [];
+      const filesList: Array<{ file: string; data: Uint8Array }> = [];
 
       for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
         if (!zipEntry.dir) {
-          const content = await zipEntry.async('string');
+          const content = await zipEntry.async('uint8array');
           filesList.push({
             file: relativePath,
             data: content
@@ -606,6 +808,7 @@ export default function SettingsPanel({
         throw new Error('Uploaded zip archive is empty.');
       }
 
+      addLog(`✨ ZIP parsed successfully. Extracted ${filesList.length} files...`);
       await executeVercelDeployment(filesList);
     } catch (err: any) {
       setDeployError(err.message || 'Failed to parse uploaded ZIP file.');
@@ -641,24 +844,29 @@ export default function SettingsPanel({
   );
   return (
     <AnimatePresence>
-      {isOpen && (
-        <div id="settings-modal" className="fixed inset-0 z-50 flex justify-center items-center p-4 sm:p-6 md:p-10">
+      {(isInline || isOpen) && (
+        <div id="settings-modal" className={isInline ? "w-full h-full relative" : "fixed inset-0 z-50 flex justify-center items-center p-4 sm:p-6 md:p-10 font-sans"}>
           {/* Blur Overlay Mask */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="absolute inset-0 bg-[#040406]/92 backdrop-blur-md"
-          />
+          {!isInline && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="absolute inset-0 bg-[#040406]/92 backdrop-blur-md"
+            />
+          )}
 
           {/* Center-Aligned Split Pane Window Container */}
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-            className="relative w-full max-w-5xl xl:max-w-6xl h-[90vh] md:h-[85vh] bg-[#08080A] border border-white/10 rounded-2xl flex flex-col md:flex-row shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] overflow-hidden z-10 font-sans"
+            initial={isInline ? { opacity: 0 } : { scale: 0.95, opacity: 0 }}
+            animate={isInline ? { opacity: 1 } : { scale: 1, opacity: 1 }}
+            exit={isInline ? { opacity: 0 } : { scale: 0.95, opacity: 0 }}
+            transition={isInline ? { duration: 0.2 } : { type: 'spring', damping: 26, stiffness: 220 }}
+            className={isInline
+              ? "relative w-full h-full bg-[#08080A] border border-white/5 rounded-2xl flex flex-col md:flex-row overflow-hidden font-sans"
+              : "relative w-full max-w-5xl xl:max-w-6xl h-[90vh] md:h-[85vh] bg-[#08080A] border border-white/10 rounded-2xl flex flex-col md:flex-row shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] overflow-hidden z-10 font-sans"
+            }
           >
             {/* Left Sidebar Menu Side Pane */}
             <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-white/5 bg-[#09090C] flex flex-col p-4 md:p-5 flex-shrink-0">
@@ -852,6 +1060,41 @@ export default function SettingsPanel({
                       </button>
                     )}
                   </div>
+
+                  {/* Multi-accounts Quick Switch Panel */}
+                  {accounts && accounts.length > 1 && (
+                    <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl space-y-2.5 text-left">
+                      <div className="flex items-center gap-1.5 px-1">
+                        <Github className="w-3.5 h-3.5 text-indigo-400" />
+                        <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Quick Account Switcher</h5>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {accounts.map((acc, idx) => {
+                          const isActive = user?.login.toLowerCase() === acc.user.login.toLowerCase();
+                          return (
+                            <button
+                              key={`quick-acc-${acc.user.login}-${idx}`}
+                              onClick={() => !isActive && onSwitchAccount?.(acc.token)}
+                              disabled={isActive}
+                              className={`p-2.5 rounded-xl border flex items-center justify-between text-left transition ${
+                                isActive
+                                  ? 'bg-indigo-600/15 border-indigo-500/25 cursor-default'
+                                  : 'bg-[#141418] border-white/5 hover:border-white/10 hover:bg-[#1c1c24]'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 overflow-hidden">
+                                <img src={acc.user.avatar_url} alt={acc.user.login} className="w-6 h-6 rounded-full border border-indigo-500/10" />
+                                <span className="text-xs font-semibold text-slate-200 truncate">@{acc.user.login}</span>
+                              </div>
+                              {isActive && (
+                                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* List of Features (Vertical, Organized, Premium Grid) */}
                   <div className="space-y-3.5">
@@ -1070,6 +1313,60 @@ export default function SettingsPanel({
                         </div>
                       </form>
                     </div>
+
+                    {/* Linked Accounts List (Max 3) */}
+                    {accounts && accounts.length > 0 && (
+                      <div className="p-5 bg-[#141418] border border-white/5 rounded-2xl space-y-3 text-left">
+                        <div className="flex items-center gap-1.5">
+                          <Github className="w-4 h-4 text-indigo-400" />
+                          <h5 className="text-[11px] font-bold text-slate-300 uppercase tracking-wider font-mono">Linked Accounts (Switch instantly)</h5>
+                        </div>
+                        <div className="space-y-2.5">
+                          {accounts.map((acc, idx) => {
+                            const isActive = user?.login.toLowerCase() === acc.user.login.toLowerCase();
+                            return (
+                              <div
+                                key={`auth-acc-${acc.user.login}-${idx}`}
+                                className={`p-3 rounded-xl border flex items-center justify-between transition ${
+                                  isActive
+                                    ? 'bg-indigo-600/10 border-indigo-500/25'
+                                    : 'bg-[#0A0A0C] border-white/5'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <img src={acc.user.avatar_url} alt={acc.user.login} className="w-8 h-8 rounded-full border border-white/10" />
+                                  <div>
+                                    <p className="text-xs font-bold text-slate-200">{acc.user.name || acc.user.login}</p>
+                                    <p className="text-[10px] text-slate-500 font-mono">@{acc.user.login}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {isActive ? (
+                                    <span className="text-[9px] font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">Active</span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => onSwitchAccount?.(acc.token)}
+                                      className="px-2.5 py-1 bg-white/5 hover:bg-indigo-600 hover:text-white text-slate-300 rounded-lg text-[10px] font-bold transition"
+                                    >
+                                      Switch
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => onRemoveAccount?.(acc.user.login)}
+                                    className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg transition"
+                                    title="Unlink Account"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Vercel Cloud Integration Section */}
@@ -1198,6 +1495,19 @@ export default function SettingsPanel({
                               Explore
                             </button>
                             <button
+                              onClick={() => {
+                                setConfigRepo(repo);
+                                setNewRepoName(repo.name);
+                                setIsRepoPrivate(repo.private);
+                                setSelectedFileToDeploy(null);
+                                setScreen('repo-config');
+                              }}
+                              className="p-2.5 bg-amber-500/5 hover:bg-amber-500/20 text-slate-400 hover:text-amber-400 rounded-xl transition border border-transparent hover:border-amber-500/10"
+                              title="Config Repo (Rename, Privacy, Rename Files)"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => triggerDeleteRepo(repo)}
                               className="p-2.5 bg-rose-500/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-xl transition border border-transparent hover:border-rose-500/10"
                               title="Delete Repository"
@@ -1207,6 +1517,263 @@ export default function SettingsPanel({
                           </div>
                         </div>
                       ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* --- SCREEN: REPO CONFIG PANEL --- */}
+              {screen === 'repo-config' && configRepo && (
+                <div className="space-y-6">
+                  {/* Navigation Back */}
+                  <button
+                    onClick={() => setScreen('repos')}
+                    className="flex items-center gap-2 text-slate-400 hover:text-slate-100 text-xs font-semibold transition"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span>Back to Repositories</span>
+                  </button>
+
+                  <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-100">Repository Configuration</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Manage details and file settings for {configRepo.full_name}</p>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/10">
+                      Config Active
+                    </span>
+                  </div>
+
+                  {/* Config Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Left Column: Repo Properties */}
+                    <div className="p-5 bg-[#141418] border border-white/5 rounded-2xl space-y-4 text-left">
+                      <div className="flex items-center gap-2 text-indigo-400">
+                        <Settings className="w-4 h-4" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider font-mono">General Settings</h4>
+                      </div>
+
+                      {/* Name input */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Repository Name</label>
+                        <input
+                          type="text"
+                          value={newRepoName}
+                          onChange={(e) => setNewRepoName(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-[#0A0A0B] border border-white/10 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                          placeholder="e.g. portfolio"
+                        />
+                      </div>
+
+                      {/* Privacy toggle */}
+                      <div className="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+                        <div className="text-left">
+                          <p className="text-xs font-bold text-slate-200">Private Repository</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">Only you can see this repository</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsRepoPrivate(!isRepoPrivate)}
+                          className={`relative inline-flex h-5.5 w-10.5 items-center rounded-colors focus:outline-none transition-colors ${
+                            isRepoPrivate ? 'bg-indigo-600' : 'bg-slate-800'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                              isRepoPrivate ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      <button
+                        onClick={handleUpdateRepoSettings}
+                        disabled={repoUpdating}
+                        className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2"
+                      >
+                        {repoUpdating ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Updating Repository...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            <span>Save General Settings</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Right Column: File Rename utility */}
+                    <div className="p-5 bg-[#141418] border border-white/5 rounded-2xl space-y-4 text-left">
+                      <div className="flex items-center gap-2 text-amber-400">
+                        <Edit2 className="w-4 h-4" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider font-mono">Rename / Replace File</h4>
+                      </div>
+                      
+                      <p className="text-[11px] text-slate-400 leading-normal">
+                        Change the path or filename of any asset inside the repository. Useful for switching homepage setups or rewriting asset mappings (e.g., <code className="text-amber-300 font-mono text-[10px]">market.html</code> to <code className="text-amber-300 font-mono text-[10px]">Mykor.html</code>).
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Old File Path</label>
+                          <input
+                            type="text"
+                            value={renameOldPath}
+                            onChange={(e) => setRenameOldPath(e.target.value)}
+                            className="w-full px-3.5 py-2.5 bg-[#0A0A0B] border border-white/10 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                            placeholder="e.g. market.html"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">New File Path</label>
+                          <input
+                            type="text"
+                            value={renameNewPath}
+                            onChange={(e) => setRenameNewPath(e.target.value)}
+                            className="w-full px-3.5 py-2.5 bg-[#0A0A0B] border border-white/10 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                            placeholder="e.g. Mykor.html"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleRenameFileInRepo}
+                        disabled={fileRenaming || !renameOldPath.trim() || !renameNewPath.trim()}
+                        className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2"
+                      >
+                        {fileRenaming ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Renaming in progress...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Execute File Rename</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Section 3: File Preview, CDN & Direct Raw Deploy Links */}
+                  <div className="p-5 bg-[#141418] border border-white/5 rounded-2xl text-left space-y-4">
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <Globe className="w-4 h-4" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider font-mono">Deploy & Preview File CDN URLs</h4>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-normal">
+                      Select any compiled file inside the repository to view its direct server CDN link, deploy endpoint, or raw resource.
+                    </p>
+
+                    {loading ? (
+                      <div className="py-8 flex flex-col items-center justify-center gap-2">
+                        <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
+                        <span className="text-[10px] text-slate-500 font-mono">Loading repository contents...</span>
+                      </div>
+                    ) : configRepoFiles.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-500 border border-dashed border-white/5 rounded-xl">
+                        No files found in the root of this branch. Upload files or select another repository.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Select File from Repository</label>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-[#0A0A0B] border border-white/5 rounded-xl">
+                            {configRepoFiles.map((file, idx) => {
+                              const isSelected = selectedFileToDeploy?.path === file.path;
+                              return (
+                                <button
+                                  key={`config-file-${idx}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFileToDeploy(file);
+                                    setRenameOldPath(file.path);
+                                  }}
+                                  className={`p-2 rounded-lg border text-left text-[11px] font-mono truncate transition ${
+                                    isSelected
+                                      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                                      : 'bg-[#141418]/60 border-white/5 hover:border-white/10 text-slate-300'
+                                  }`}
+                                >
+                                  {file.type === 'dir' ? '📁 ' : '📄 '} {file.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {selectedFileToDeploy && (
+                          <div className="p-4 bg-black/40 border border-white/5 rounded-xl space-y-3.5">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-bold text-slate-300 font-mono">{selectedFileToDeploy.path}</span>
+                              <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 bg-emerald-500/10 text-emerald-400 font-mono font-bold rounded-full">Target Selected</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                              {/* Option A: JS Delivr CDN url */}
+                              <div className="p-3 bg-[#0A0A0B] border border-white/5 rounded-lg space-y-1">
+                                <p className="text-[9px] uppercase font-mono font-bold text-slate-500">Fast Edge CDN URL</p>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    readOnly
+                                    value={`https://cdn.jsdelivr.net/gh/${configRepo.owner?.login}/${configRepo.name}@${configRepo.default_branch || 'main'}/${selectedFileToDeploy.path}`}
+                                    className="bg-transparent flex-1 text-[10px] font-mono text-indigo-400 border-none outline-none focus:ring-0 truncate"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(`https://cdn.jsdelivr.net/gh/${configRepo.owner?.login}/${configRepo.name}@${configRepo.default_branch || 'main'}/${selectedFileToDeploy.path}`);
+                                      alert('Copied CDN link!');
+                                    }}
+                                    className="text-[10px] text-indigo-400 hover:underline font-bold"
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Option B: Direct Raw Git url */}
+                              <div className="p-3 bg-[#0A0A0B] border border-white/5 rounded-lg space-y-1">
+                                <p className="text-[9px] uppercase font-mono font-bold text-slate-500">Raw GitHub Deployment Link</p>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    readOnly
+                                    value={`https://raw.githubusercontent.com/${configRepo.owner?.login}/${configRepo.name}/${configRepo.default_branch || 'main'}/${selectedFileToDeploy.path}`}
+                                    className="bg-transparent flex-1 text-[10px] font-mono text-indigo-400 border-none outline-none focus:ring-0 truncate"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(`https://raw.githubusercontent.com/${configRepo.owner?.login}/${configRepo.name}/${configRepo.default_branch || 'main'}/${selectedFileToDeploy.path}`);
+                                      alert('Copied raw deploy link!');
+                                    }}
+                                    className="text-[10px] text-indigo-400 hover:underline font-bold"
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex justify-end gap-2">
+                              <a
+                                href={`https://raw.githubusercontent.com/${configRepo.owner?.login}/${configRepo.name}/${configRepo.default_branch || 'main'}/${selectedFileToDeploy.path}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3.5 py-1.5 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5"
+                              >
+                                <Play className="w-3.5 h-3.5" />
+                                <span>Preview Deployment</span>
+                              </a>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

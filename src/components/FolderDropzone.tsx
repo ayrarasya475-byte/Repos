@@ -6,9 +6,11 @@ import { getFilesFromDataTransfer, getFilesFromFileInput } from '../utils/fileTr
 interface FolderDropzoneProps {
   onFilesSelected: (files: UploadFile[]) => void;
   disabled: boolean;
+  unpackZip: boolean;
+  onToggleUnpackZip: () => void;
 }
 
-export default function FolderDropzone({ onFilesSelected, disabled }: FolderDropzoneProps) {
+export default function FolderDropzone({ onFilesSelected, disabled, unpackZip, onToggleUnpackZip }: FolderDropzoneProps) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -70,7 +72,7 @@ export default function FolderDropzone({ onFilesSelected, disabled }: FolderDrop
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Hidden Inputs */}
       <input
         ref={fileInputRef}
@@ -91,6 +93,23 @@ export default function FolderDropzone({ onFilesSelected, disabled }: FolderDrop
         className="hidden"
         disabled={disabled}
       />
+
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">File Import Staging</span>
+        
+        {/* Toggle Switch */}
+        <button
+          type="button"
+          onClick={onToggleUnpackZip}
+          className="flex items-center gap-1.5 px-2.5 py-1 bg-white/5 border border-white/5 rounded-full hover:bg-white/10 transition"
+          title="Toggle whether ZIP files should be fully unpacked/extracted or kept as a raw .zip archive"
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${unpackZip ? 'bg-indigo-400 animate-pulse' : 'bg-amber-400'}`} />
+          <span className="text-[10px] font-mono text-slate-400">
+            ZIP handling: <strong className={unpackZip ? 'text-indigo-300' : 'text-amber-300'}>{unpackZip ? 'Unpack' : 'Keep Packed'}</strong>
+          </span>
+        </button>
+      </div>
 
       <div
         onDragEnter={handleDrag}

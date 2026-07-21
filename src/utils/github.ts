@@ -493,4 +493,69 @@ export async function deleteDirectoryFromRepo(
   });
 }
 
+/**
+ * Update repository configuration (rename or toggle privacy)
+ */
+export async function updateRepository(
+  token: string,
+  owner: string,
+  repo: string,
+  updateData: { name?: string; private?: boolean }
+): Promise<any> {
+  return githubFetch(`/repos/${owner}/${repo}`, {
+    token,
+    method: 'PATCH',
+    body: updateData
+  });
+}
+
+/**
+ * Rename a file inside the repository by copying its content to a new path and deleting the old path
+ */
+export async function renameFileInRepo(
+  token: string,
+  owner: string,
+  repo: string,
+  oldPath: string,
+  newPath: string,
+  branch: string = 'main',
+  commitMessage: string = 'Rename file via RepostNow'
+): Promise<any> {
+  const cleanOldPath = oldPath.startsWith('/') ? oldPath.substring(1) : oldPath;
+  const cleanNewPath = newPath.startsWith('/') ? newPath.substring(1) : newPath;
+
+  // 1. Get the content of the old file
+  const encodedOldPath = cleanOldPath.split('/').map(encodeURIComponent).join('/');
+  const oldFileResponse = await githubFetch(`/repos/${owner}/${repo}/contents/${encodedOldPath}?ref=${branch}`, {
+    token
+  });
+
+  const contentBase64 = oldFileResponse.content;
+  const oldSha = oldFileResponse.sha;
+
+  // 2. Put content into the new file path
+  const encodedNewPath = cleanNewPath.split('/').map(encodeURIComponent).join('/');
+  await githubFetch(`/repos/${owner}/${repo}/contents/${encodedNewPath}`, {
+    token,
+    method: 'PUT',
+    body: {
+      message: `${commitMessage}: copy to ${cleanNewPath}`,
+      content: contentBase64,
+      branch
+    }
+  });
+
+  // 3. Delete the old file path
+  await githubFetch(`/repos/${owner}/${repo}/contents/${encodedOldPath}`, {
+    token,
+    method: 'DELETE',
+    body: {
+      message: `${commitMessage}: delete old file ${cleanOldPath}`,
+      sha: oldSha,
+      branch
+    }
+  });
+}
+
+
 
