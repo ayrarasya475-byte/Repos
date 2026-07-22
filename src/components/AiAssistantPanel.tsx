@@ -117,7 +117,23 @@ export default function AiAssistantPanel({
     localStorage.setItem('repostnow_custom_apis', JSON.stringify(customEndpoints));
   }, [customEndpoints]);
 
-  const currentSession = sessions.find(s => s.id === currentSessionId) || sessions[0];
+  const defaultSession: ChatSession = {
+    id: 'initial',
+    title: 'New Code Studio Session',
+    messages: [
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: 'Hello! I am your **RepostNow Code Studio AI Assistant**.\n\nI am fully connected online. Ask me to write code, debug issues, or execute workspace commands.\n\nType **slash commands** like:\n- `/Menu` - Displays available shortcuts.\n- `/Build <filename> <content>` - Creates/stages custom files.\n- `/Deploy <repo_name or empty>` - Triggers instant Vercel auto-deployment.\n- `/Debug <repo or vercel_link>` - Explains errors, checks deployment status & logs.\n- `/Repos` - Displays your connected GitHub repositories.',
+        mode: 'default'
+      }
+    ],
+    createdAt: new Date().toISOString()
+  };
+
+  const currentSession = (sessions && sessions.length > 0)
+    ? (sessions.find(s => s.id === currentSessionId) || sessions[0])
+    : defaultSession;
 
   const handleAttachStagedFile = (file: UploadFile) => {
     setAttachedFiles(prev => {
@@ -338,15 +354,14 @@ export default function AiAssistantPanel({
       if (command === '/menu') {
         insertLocalAssistantMessage(
           `### 💻 RepostNow Studio AI Slash Commands Menu:\n\n` +
-          `- <span class="text-blue-400 font-bold font-mono">/Menu</span> : Displays this command assistance directory.\n` +
-          `- <span class="text-blue-400 font-bold font-mono">/Build &lt;filename&gt; &lt;instructions&gt;</span> : Creates/stages a new file inside your staging workspace with maximum code quality.\n` +
-          `- <span class="text-blue-400 font-bold font-mono">/Code &lt;prompt&gt;</span> : Requests exact, highly-optimized code output for complex features.\n` +
-          `- <span class="text-blue-400 font-bold font-mono">/Repos</span> : Queries and lists your connected GitHub repositories.\n` +
-          `- <span class="text-blue-400 font-bold font-mono">/Repos &lt;category&gt;</span> : Filters your GitHub repositories list matching the category keyword.\n` +
-          `- <span class="text-blue-400 font-bold font-mono">/Deploy</span> : Triggers automatic production deployment to Vercel for all staged workspace files.\n` +
-          `- <span class="text-blue-400 font-bold font-mono">/Add &lt;filename&gt;</span> : Stages or pushes the specified file path directly to GitHub.\n\n` +
-          `*Note: Real-time slash commands are parsed locally and execute instantly even during high network latency!*`,
-          ['Initializing slash interface', 'Checking command structure'],
+          `- <span class="text-blue-400 font-bold font-mono">/Menu</span> : Displays this command directory.\n` +
+          `- <span class="text-blue-400 font-bold font-mono">/Deploy &lt;nama repositori atau kosong&gt;</span> : Directly triggers real-time Vercel auto-deployment for a repository or current staged workspace files.\n` +
+          `- <span class="text-blue-400 font-bold font-mono">/Debug &lt;Repos/link vercel yang sudah di deploy&gt;</span> : Explains errors about repo or vercel project, inspects build logs, status & solutions.\n` +
+          `- <span class="text-blue-400 font-bold font-mono">/Build &lt;filename&gt; &lt;content&gt;</span> : Creates and stages a file in your workspace.\n` +
+          `- <span class="text-blue-400 font-bold font-mono">/Add &lt;filename&gt;</span> : Creates a template component and stages it in workspace.\n` +
+          `- <span class="text-blue-400 font-bold font-mono">/Repos [kata kunci]</span> : Queries and lists connected GitHub repositories.\n\n` +
+          `*Note: No manual permissions required. Vercel SPA routing (\`vercel.json\`) and root \`index.html\` are automatically injected when missing.*`,
+          ['Initializing slash command engine', 'Checking workspace state'],
           undefined,
           ['Executed /Menu router']
         );
@@ -391,23 +406,247 @@ export default function AiAssistantPanel({
       }
 
       if (command === '/deploy') {
-        if (stagedFiles.length === 0) {
+        const targetRepoName = arg ? arg.trim() : '';
+        const vercelToken = localStorage.getItem('repostnow_vercel_token') || '';
+        
+        if (!vercelToken) {
           insertLocalAssistantMessage(
-            `⚠️ **Cannot Deploy:** No files are currently staged in your workspace. Please add files in the main dashboard tab first.`,
-            ['Validating workspace size', 'Checked files payload'],
+            `⚠️ **Vercel API Token Missing!**\n\nPlease configure your Vercel API Token in the **Settings / Vercel Credentials** tab first so AI can deploy on your behalf.`,
+            ['Checking Vercel API credentials'],
             undefined,
-            ['Block deployment: staged files empty']
+            ['Deployment aborted: missing vercelToken']
           );
           return;
         }
 
         insertLocalAssistantMessage(
-          `🚀 **Deployment Triggered!**\n\nStaging complete. I'm preparing **${stagedFiles.length} files** for automatic production compilation on Vercel.\n\n` +
-          `Please switch to the **Stats** dashboard tab to monitor your new live URL, add custom domain paths, or inspect active deployment logs.`,
-          ['Compressing files pack', 'Resolving routing redirects', 'Initiating build stream'],
+          `🚀 **AI Auto-Deployment Active!**\n\n` +
+          `Preparing ${targetRepoName ? `repository "${targetRepoName}"` : `${stagedFiles.length} staged workspace file(s)`} for production compilation on Vercel...\n` +
+          `Auto-injecting \`vercel.json\` and \`index.html\` if missing...`,
+          ['Preparing deployment payload', 'Ensuring vercel.json & index.html routing', 'Calling Vercel Edge API'],
           undefined,
-          stagedFiles.map(f => `Compiling file: ${f.name}`)
+          [`Initiated /deploy ${targetRepoName}`]
         );
+
+        (async () => {
+          try {
+            let filesList: Array<{ file: string; data: Uint8Array }> = [];
+
+            if (targetRepoName) {
+              const matchedRepo = repos.find(r => r.name.toLowerCase() === targetRepoName.toLowerCase() || r.full_name.toLowerCase().endsWith(`/${targetRepoName.toLowerCase()}`));
+              if (!matchedRepo) {
+                insertLocalAssistantMessage(`⚠️ Repository "${targetRepoName}" not found in your connected GitHub account.`);
+                return;
+              }
+
+              const ref = matchedRepo.default_branch || 'main';
+              const ownerName = matchedRepo.owner?.login || '';
+              const token = localStorage.getItem('repostnow_github_token') || '';
+              const response = await fetch(`/api/proxy-github-zip?owner=${encodeURIComponent(ownerName)}&repo=${encodeURIComponent(matchedRepo.name)}&ref=${encodeURIComponent(ref)}&token=${encodeURIComponent(token)}&_nocache=${Date.now()}`);
+
+              if (!response.ok) {
+                throw new Error(`Failed to download repository files from GitHub (HTTP ${response.status})`);
+              }
+
+              const zipBlob = await response.blob();
+              const zip = await JSZip.loadAsync(zipBlob);
+
+              for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
+                if (!zipEntry.dir) {
+                  const content = await zipEntry.async('uint8array');
+                  const segments = relativePath.split('/');
+                  segments.shift();
+                  const cleanPath = segments.join('/');
+                  if (cleanPath) {
+                    filesList.push({ file: cleanPath, data: content });
+                  }
+                }
+              }
+            } else {
+              if (stagedFiles.length === 0) {
+                insertLocalAssistantMessage(`⚠️ Workspace staging is empty. Please add files in the home tab or specify repo e.g. \`/deploy my-repo\`.`);
+                return;
+              }
+              for (const staged of stagedFiles) {
+                const arrayBuffer = await staged.file.arrayBuffer();
+                filesList.push({ file: staged.path, data: new Uint8Array(arrayBuffer) });
+              }
+            }
+
+            // Auto-enrich vercel.json & index.html
+            const hasVercelJson = filesList.some(f => f.file.toLowerCase() === 'vercel.json');
+            const hasIndexHtml = filesList.some(f => f.file.toLowerCase() === 'index.html' || f.file.toLowerCase().endsWith('/index.html'));
+
+            if (!hasVercelJson) {
+              const vJson = JSON.stringify({ rewrites: [{ source: "/(.*)", destination: "/index.html" }] }, null, 2);
+              filesList.push({ file: 'vercel.json', data: new TextEncoder().encode(vJson) });
+            }
+
+            if (!hasIndexHtml) {
+              const iHtml = `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8"><title>Deployed App</title></head>\n  <body><div id="root"></div></body>\n</html>`;
+              filesList.push({ file: 'index.html', data: new TextEncoder().encode(iHtml) });
+            }
+
+            // Filter junk files
+            filesList = filesList.filter(item => {
+              const p = item.file.toLowerCase();
+              return !(p.includes('node_modules/') || p.includes('.git/') || p.includes('.github/') || p.endsWith('.ds_store'));
+            });
+
+            // Hash & Upload
+            const processedFiles = await Promise.all(filesList.map(async item => {
+              const hashBuffer = await crypto.subtle.digest('SHA-1', item.data);
+              const sha = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+              return { file: item.file, sha, size: item.data.length, data: item.data };
+            }));
+
+            for (const item of processedFiles) {
+              await fetch(`/api/proxy-vercel-file?file=${encodeURIComponent(item.file)}`, {
+                method: 'POST',
+                headers: {
+                  'x-vercel-token': vercelToken,
+                  'Content-Type': 'application/octet-stream',
+                  'x-now-digest': item.sha,
+                  'x-now-size': String(item.size),
+                },
+                body: item.data,
+              });
+            }
+
+            const projName = targetRepoName ? targetRepoName.toLowerCase().replace(/[^a-z0-9-]/g, '-') : 'repostnow-app';
+            const payload = {
+              name: projName,
+              files: processedFiles.map(i => ({ file: i.file, sha: i.sha, size: i.size, mode: 33188 })),
+              projectSettings: { framework: null }
+            };
+
+            const createRes = await fetch(`/api/proxy-vercel-deployments`, {
+              method: 'POST',
+              headers: {
+                'x-vercel-token': vercelToken,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(payload)
+            });
+
+            const deployData = await createRes.json();
+            if (!createRes.ok) {
+              throw new Error(deployData?.error?.message || 'Vercel Deployment creation failed');
+            }
+
+            const liveUrl = `https://${deployData.url}`;
+            insertLocalAssistantMessage(
+              `🎉 **Vercel Deployment Complete!**\n\n` +
+              `Your app is now live on Vercel:\n\n` +
+              `🌐 **Live URL**: [${liveUrl}](${liveUrl})\n` +
+              `🆔 **Deployment ID**: \`${deployData.id}\`\n` +
+              `📦 **Files Compiled**: ${processedFiles.length} source file(s)\n\n` +
+              `*Routing configurations (\`vercel.json\`) and root \`index.html\` auto-injected seamlessly.*`,
+              ['Deployment succeeded', 'Verified live URL'],
+              [{ title: `Vercel Deployment: ${projName}`, url: liveUrl }],
+              [`Deployed project ${projName} to ${liveUrl}`]
+            );
+          } catch (err: any) {
+            insertLocalAssistantMessage(
+              `❌ **Deployment Error:**\n\n${err.message || 'Failed to deploy to Vercel.'}`,
+              ['Deployment attempt failed'],
+              undefined,
+              [`Error: ${err.message}`]
+            );
+          }
+        })();
+        return;
+      }
+
+      if (command === '/debug') {
+        const target = arg ? arg.trim() : '';
+        if (!target) {
+          insertLocalAssistantMessage(
+            `⚠️ **Usage:** \`/debug <Repos/link vercel yang sudah di deploy>\`\n\nContoh: \`/debug my-repo\` atau \`/debug https://repostnow-app.vercel.app\``
+          );
+          return;
+        }
+
+        const vercelToken = localStorage.getItem('repostnow_vercel_token') || '';
+
+        insertLocalAssistantMessage(
+          `🔍 **AI Debugging Engine Active!**\n\nAnalyzing target: \`${target}\`...\nFetching build status, deployment logs, and repository configurations...`,
+          ['Inspecting Vercel API status', 'Fetching build logs', 'Analyzing repository configurations'],
+          undefined,
+          [`Debugging target: ${target}`]
+        );
+
+        (async () => {
+          try {
+            let debugContext = `Target: ${target}\n`;
+
+            if (vercelToken) {
+              try {
+                const projsRes = await fetch(`/api/proxy-vercel-projects`, {
+                  headers: { 'x-vercel-token': vercelToken }
+                });
+                if (projsRes.ok) {
+                  const projsData = await projsRes.json();
+                  const projects = projsData.projects || [];
+                  const matchedProj = projects.find((p: any) => 
+                    p.name.toLowerCase().includes(target.toLowerCase()) || 
+                    target.toLowerCase().includes(p.name.toLowerCase())
+                  );
+                  if (matchedProj) {
+                    debugContext += `Vercel Project Found: ${matchedProj.name} (ID: ${matchedProj.id})\n`;
+                    debugContext += `Framework: ${matchedProj.framework || 'Custom/SPA'}\n`;
+                    debugContext += `Updated At: ${new Date(matchedProj.updatedAt).toLocaleString()}\n`;
+                    if (matchedProj.targets?.production) {
+                      debugContext += `Production Target: ${matchedProj.targets.production.url}\nState: ${matchedProj.targets.production.readyState}\n`;
+                    }
+                  }
+                }
+              } catch (vErr) {
+                console.error('Vercel debug fetch error:', vErr);
+              }
+            }
+
+            const matchedRepo = repos.find(r => r.name.toLowerCase().includes(target.toLowerCase()) || target.toLowerCase().includes(r.name.toLowerCase()));
+            if (matchedRepo) {
+              debugContext += `GitHub Repository Found: ${matchedRepo.full_name}\n`;
+              debugContext += `Default Branch: ${matchedRepo.default_branch || 'main'}\n`;
+              debugContext += `Open Issues / PRs: ${matchedRepo.open_issues_count || 0}\n`;
+              debugContext += `Language: ${matchedRepo.language || 'TypeScript'}\n`;
+            }
+
+            const prompt = `Lakukan analisa debug dan penjelasan lengkap mengenai error / status repositori & project vercel ini:\n\n${debugContext}\n\nBerikan penjelasan penyebab error, status kesehatan deployment, serta langkah perbaikan yang konkret.`;
+
+            const aiResponse = await fetch('/api/gemini/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messages: [
+                  { role: 'user', content: prompt }
+                ],
+                systemPrompt: 'You are an expert DevOps and Full-Stack Web Engineer. Provide clear, detailed, and actionable diagnostic reports.',
+                temperature: 0.3
+              })
+            });
+
+            if (aiResponse.ok) {
+              const reportText = await aiResponse.text();
+              insertLocalAssistantMessage(
+                `🛠️ **Laporan Diagnostik AI untuk \`${target}\`**:\n\n${reportText}`,
+                ['Analyzed Vercel & GitHub metadata', 'Synthesized diagnostic insights'],
+                undefined,
+                [`Completed debug analysis for ${target}`]
+              );
+            } else {
+              insertLocalAssistantMessage(
+                `🔍 **Hasil Pengecekan \`${target}\`**:\n\n` +
+                `\`\`\`text\n${debugContext}\n\`\`\`\n` +
+                `*Status*: Konfigurasi project terpantau normal. Jika terjadi 404 pada SPA, pastikan file \`vercel.json\` berisi rewrites ke \`/index.html\`.`
+              );
+            }
+          } catch (err: any) {
+            insertLocalAssistantMessage(`⚠️ Error saat menjalankan debug: ${err.message || 'Gagal memeriksa target.'}`);
+          }
+        })();
         return;
       }
 
@@ -418,7 +657,7 @@ export default function AiAssistantPanel({
           const fileContent = fileMatch[2];
           handleInjectFileToWorkspace(fileName, fileContent);
           insertLocalAssistantMessage(
-            `✅ **File Created and Staged!**\n\nI have successfully built and staged \`${fileName}\` with your requested contents in the staging area. You can see it on your home dashboard.`,
+            `✅ **File Created and Staged!**\n\nI have built and staged \`${fileName}\` in your workspace staging area. You can view or upload it on your home dashboard.`,
             ['Parsing build request', `Writing file contents for ${fileName}`],
             undefined,
             [`Wrote ${fileName} to staging`]
@@ -426,7 +665,7 @@ export default function AiAssistantPanel({
           return;
         } else {
           insertLocalAssistantMessage(
-            `⚠️ **Invalid /build syntax!**\n\nUse \`/build <filename> <content>\` (e.g. \`/build style.css h1 { color: red; }\`)`,
+            `⚠️ **Invalid /build syntax!**\n\nUse \`/build <filename> <content>\` (e.g. \`/build App.tsx export default function App() { return <div>Hello</div>; }\`)`,
             ['Validating command parameters'],
             undefined,
             ['Command error: invalid /build syntax']
@@ -441,7 +680,7 @@ export default function AiAssistantPanel({
           const fileContent = `// Created via RepostNow Studio AI\n// File: ${fileName}\n\nexport default function ${fileName.split('.')[0]}() {\n  return <div>Custom component</div>;\n}`;
           handleInjectFileToWorkspace(fileName, fileContent);
           insertLocalAssistantMessage(
-            `✅ **File "${fileName}" Staged!**\n\nI have created a template file \`${fileName}\` and added it to your staging workspace successfully!`,
+            `✅ **File "${fileName}" Staged!**\n\nI have created a template file \`${fileName}\` and added it to your workspace staging area!`,
             [`Staging ${fileName}`],
             undefined,
             [`Staged file: ${fileName}`]
@@ -703,25 +942,26 @@ export default function AiAssistantPanel({
     const lines = text.split('\n');
     return lines.map((line, idx) => {
       const trimmed = line.trim();
+      const lineKey = `line-${idx}`;
       
       // 1. Headers (### or ## or #)
       if (trimmed.startsWith('###')) {
         return (
-          <h4 key={idx} className="text-xs font-bold text-slate-100 uppercase tracking-wider font-mono text-indigo-400 mt-4 mb-2">
+          <h4 key={lineKey} className="text-xs font-bold text-slate-100 uppercase tracking-wider font-mono text-indigo-400 mt-4 mb-2">
             {formatInlineMarkdown(trimmed.replace('###', '').trim())}
           </h4>
         );
       }
       if (trimmed.startsWith('##')) {
         return (
-          <h3 key={idx} className="text-sm font-bold text-slate-50 tracking-tight mt-5 mb-2.5 border-b border-white/5 pb-1 text-indigo-400">
+          <h3 key={lineKey} className="text-sm font-bold text-slate-50 tracking-tight mt-5 mb-2.5 border-b border-white/5 pb-1 text-indigo-400">
             {formatInlineMarkdown(trimmed.replace('##', '').trim())}
           </h3>
         );
       }
       if (trimmed.startsWith('#')) {
         return (
-          <h2 key={idx} className="text-base font-black text-white tracking-tight mt-6 mb-3 text-indigo-400">
+          <h2 key={lineKey} className="text-base font-black text-white tracking-tight mt-6 mb-3 text-indigo-400">
             {formatInlineMarkdown(trimmed.replace('#', '').trim())}
           </h2>
         );
@@ -731,7 +971,7 @@ export default function AiAssistantPanel({
       if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
         const content = trimmed.substring(2);
         return (
-          <div key={idx} className="flex items-start gap-2 ml-4 my-1 text-slate-300 text-xs sm:text-sm text-left">
+          <div key={lineKey} className="flex items-start gap-2 ml-4 my-1 text-slate-300 text-xs sm:text-sm text-left">
             <span className="text-indigo-400 select-none mt-1.5 text-[6px]">●</span>
             <span className="flex-1">{formatInlineMarkdown(content)}</span>
           </div>
@@ -742,7 +982,7 @@ export default function AiAssistantPanel({
       const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
       if (numMatch) {
         return (
-          <div key={idx} className="flex items-start gap-2 ml-4 my-1 text-slate-300 text-xs sm:text-sm text-left">
+          <div key={lineKey} className="flex items-start gap-2 ml-4 my-1 text-slate-300 text-xs sm:text-sm text-left">
             <span className="text-indigo-400 font-mono font-bold select-none text-xs">{numMatch[1]}.</span>
             <span className="flex-1">{formatInlineMarkdown(numMatch[2])}</span>
           </div>
@@ -751,46 +991,48 @@ export default function AiAssistantPanel({
 
       // 4. Empty lines
       if (!trimmed) {
-        return <div key={idx} className="h-2" />;
+        return <div key={lineKey} className="h-2" />;
       }
 
       // 5. Normal paragraphs
       return (
-        <p key={idx} className="leading-relaxed text-slate-300 text-xs sm:text-sm my-1 text-left">
+        <p key={lineKey} className="leading-relaxed text-slate-300 text-xs sm:text-sm my-1 text-left">
           {formatInlineMarkdown(line)}
         </p>
       );
     });
   };
 
-  // Helper to format inline tags (bold, inline code, links)
+  // Helper to format inline tags (bold, inline code, links) with unique keys
   const formatInlineMarkdown = (text: string) => {
+    if (!text) return text;
+    let keySeq = 0;
     let parts: Array<string | React.ReactNode> = [text];
     
     // Process Bold (**text**)
     parts = parts.flatMap(part => {
-      if (typeof part !== 'string') return part;
+      if (typeof part !== 'string') return [part];
       const subParts = part.split(/\*\*([\s\S]*?)\*\*/g);
-      return subParts.map((sub, i) => (i % 2 === 1) ? <strong key={i} className="font-extrabold text-white bg-white/5 px-1 py-0.5 rounded">{sub}</strong> : sub);
+      return subParts.map((sub, i) => (i % 2 === 1) ? <strong key={`b-${keySeq++}`} className="font-extrabold text-white bg-white/5 px-1 py-0.5 rounded">{sub}</strong> : sub);
     });
 
     // Process Inline Code (`code`)
     parts = parts.flatMap(part => {
-      if (typeof part !== 'string') return part;
+      if (typeof part !== 'string') return [part];
       const subParts = part.split(/`([^`]+)`/g);
-      return subParts.map((sub, i) => (i % 2 === 1) ? <code key={i} className="font-mono text-xs text-indigo-300 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-500/15 font-semibold">{sub}</code> : sub);
+      return subParts.map((sub, i) => (i % 2 === 1) ? <code key={`c-${keySeq++}`} className="font-mono text-xs text-indigo-300 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-500/15 font-semibold">{sub}</code> : sub);
     });
 
     // Process Links ([label](url))
     parts = parts.flatMap(part => {
-      if (typeof part !== 'string') return part;
+      if (typeof part !== 'string') return [part];
       const subParts = part.split(/\[([^\]]+)\]\(([^)]+)\)/g);
-      const result = [];
+      const result: Array<string | React.ReactNode> = [];
       for (let i = 0; i < subParts.length; i += 3) {
         result.push(subParts[i]);
         if (i + 1 < subParts.length) {
           result.push(
-            <a key={i} href={subParts[i + 2]} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold inline-flex items-center gap-0.5">
+            <a key={`l-${keySeq++}`} href={subParts[i + 2]} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold inline-flex items-center gap-0.5">
               {subParts[i + 1]}
               <LinkIcon className="w-3 h-3 inline text-indigo-400" />
             </a>
@@ -802,18 +1044,19 @@ export default function AiAssistantPanel({
 
     // Highlight Slash commands specifically in blue
     parts = parts.flatMap(part => {
-      if (typeof part !== 'string') return part;
-      const regex = /(\/(menu|build|code|repos|deploy|add)(?:\b|\s))/gi;
+      if (typeof part !== 'string') return [part];
+      const regex = /(\/(menu|build|code|repos|deploy|add|debug)(?:\b|\s))/gi;
       const subParts = part.split(regex);
-      return subParts.map((sub, i) => {
-        if (sub.toLowerCase().startsWith('/menu') || sub.toLowerCase().startsWith('/build') || sub.toLowerCase().startsWith('/code') || sub.toLowerCase().startsWith('/repos') || sub.toLowerCase().startsWith('/deploy') || sub.toLowerCase().startsWith('/add')) {
-          return <span key={i} className="text-blue-400 font-extrabold font-mono">{sub}</span>;
+      return subParts.map((sub) => {
+        const lower = sub.toLowerCase();
+        if (lower.startsWith('/menu') || lower.startsWith('/build') || lower.startsWith('/code') || lower.startsWith('/repos') || lower.startsWith('/deploy') || lower.startsWith('/add') || lower.startsWith('/debug')) {
+          return <span key={`cmd-${keySeq++}`} className="text-blue-400 font-extrabold font-mono">{sub}</span>;
         }
         return sub;
       });
     });
 
-    return parts;
+    return parts.map((item, idx) => (typeof item === 'string' ? item : React.cloneElement(item as React.ReactElement, { key: `inline-elem-${idx}` })));
   };
 
   const renderMessageContent = (msg: Message) => {

@@ -61,6 +61,7 @@ export default function SettingsPanel({
 
   // Vercel deployment configurations
   const [vercelToken, setVercelToken] = useState('');
+  const [vercelTeamId, setVercelTeamId] = useState('');
   const [vercelProjectName, setVercelProjectName] = useState('repostnow-app');
   const [deployStatus, setDeployStatus] = useState<'idle' | 'packing' | 'uploading' | 'queued' | 'building' | 'success' | 'error'>('idle');
   const [deployError, setDeployError] = useState<string | null>(null);
@@ -127,6 +128,8 @@ export default function SettingsPanel({
     setInputToken(token);
     const savedVercelToken = safeStorage.getItem('REPOSTNOW_VERCEL_TOKEN') || '';
     setVercelToken(savedVercelToken);
+    const savedVercelTeamId = safeStorage.getItem('REPOSTNOW_VERCEL_TEAM_ID') || '';
+    setVercelTeamId(savedVercelTeamId);
     
     // Automatically reset sub-state when closing
     if (!isOpen) {
@@ -484,6 +487,16 @@ export default function SettingsPanel({
     safeStorage.setItem('REPOSTNOW_VERCEL_TOKEN', tokenValue.trim());
   };
 
+  // Save Vercel Team ID Helper
+  const handleSaveVercelTeamId = (teamIdValue: string) => {
+    setVercelTeamId(teamIdValue.trim());
+    if (teamIdValue.trim()) {
+      safeStorage.setItem('REPOSTNOW_VERCEL_TEAM_ID', teamIdValue.trim());
+    } else {
+      safeStorage.removeItem('REPOSTNOW_VERCEL_TEAM_ID');
+    }
+  };
+
   // Helper to compute SHA-1 hash and size of a file (highly compatible, native Web Crypto API)
   const computeSHA1 = async (bytes: Uint8Array): Promise<{ sha: string; size: number }> => {
     const hashBuffer = await crypto.subtle.digest('SHA-1', bytes);
@@ -572,7 +585,8 @@ export default function SettingsPanel({
         await Promise.all(
           chunk.map(async (item) => {
             try {
-              const res = await fetch('/api/proxy-vercel-file', {
+              const url = `/api/proxy-vercel-file?file=${encodeURIComponent(item.file)}${vercelTeamId ? `&teamId=${vercelTeamId}` : ''}`;
+              const res = await fetch(url, {
                 method: 'POST',
                 headers: {
                   'x-vercel-token': vercelToken,
@@ -615,7 +629,8 @@ export default function SettingsPanel({
         },
       };
 
-      const res = await fetch('/api/proxy-vercel-deployments', {
+      const createUrl = `/api/proxy-vercel-deployments${vercelTeamId ? `?teamId=${vercelTeamId}` : ''}`;
+      const res = await fetch(createUrl, {
         method: 'POST',
         headers: {
           'x-vercel-token': vercelToken,
@@ -660,7 +675,8 @@ export default function SettingsPanel({
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
         try {
-          const pollRes = await fetch(`/api/proxy-vercel-poll/${deploymentId}`, {
+          const pollUrl = `/api/proxy-vercel-poll/${deploymentId}${vercelTeamId ? `?teamId=${vercelTeamId}` : ''}`;
+          const pollRes = await fetch(pollUrl, {
             headers: {
               'x-vercel-token': vercelToken,
             },
@@ -757,51 +773,58 @@ export default function SettingsPanel({
     }
   };
 
-  // Helper to trigger the deployment permission check modal
-  const triggerDeployWithPermissionCheck = (filesList: Array<{ file: string; data: Uint8Array }>) => {
-    setPendingDeploymentFiles(filesList);
-    setShowDeployPermissionModal(true);
-  };
+  // Helper to trigger the deployment without permission popups
+  const triggerDeployWithPermissionCheck = async (filesList: Array<{ file: string; data: Uint8Array }>) => {
+    let finalFiles = [...filesList];
 
-  // Callback to finalize deployment after permission checkbox confirmation
-  const confirmAndStartVercelDeployment = async () => {
-    if (!pendingDeploymentFiles) return;
-    
-    let finalFiles = [...pendingDeploymentFiles];
-    
-    // 1. Permission Check: Add vercel.json for SPA routing if not exists
-    if (permissionAddVercelJson) {
-      const cleanPaths = finalFiles.map(f => cleanFilePath(f.file).toLowerCase());
-      const hasVercelJson = cleanPaths.some(p => p === 'vercel.json');
-      if (!hasVercelJson) {
-        const vercelJsonContent = JSON.stringify({
-          rewrites: [
-            { source: "/(.*)", destination: "/index.html" }
-          ]
-        }, null, 2);
-        const encoder = new TextEncoder();
-        finalFiles.push({
-          file: 'vercel.json',
-          data: encoder.encode(vercelJsonContent)
-        });
-      }
-    }
-    
-    // 2. Permission Check: Filter junk files
-    if (permissionFilterJunk) {
-      finalFiles = finalFiles.filter(item => {
-        const path = cleanFilePath(item.file).toLowerCase();
-        return !(
-          path.includes('node_modules/') ||
-          path.includes('.git/') ||
-          path.includes('.github/') ||
-          path.endsWith('.ds_store')
-        );
+    // 1. Auto-enrich: vercel.json for SPA routing if not exists
+    const cleanPaths = finalFiles.map(f => cleanFilePath(f.file).toLowerCase());
+    const hasVercelJson = cleanPaths.some(p => p === 'vercel.json');
+    if (!hasVercelJson) {
+      const vercelJsonContent = JSON.stringify({
+        rewrites: [
+          { source: "/(.*)", destination: "/index.html" }
+        ]
+      }, null, 2);
+      const encoder = new TextEncoder();
+      finalFiles.push({
+        file: 'vercel.json',
+        data: encoder.encode(vercelJsonContent)
       });
     }
-    
-    setShowDeployPermissionModal(false);
-    setPendingDeploymentFiles(null);
+
+    // 2. Auto-enrich: index.html entry point if not exists
+    const hasIndexHtml = cleanPaths.some(p => p === 'index.html' || p.endsWith('/index.html'));
+    if (!hasIndexHtml) {
+      const indexHtmlContent = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deployed App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>`;
+      const encoder = new TextEncoder();
+      finalFiles.push({
+        file: 'index.html',
+        data: encoder.encode(indexHtmlContent)
+      });
+    }
+
+    // 3. Auto-filter junk files
+    finalFiles = finalFiles.filter(item => {
+      const path = cleanFilePath(item.file).toLowerCase();
+      return !(
+        path.includes('node_modules/') ||
+        path.includes('.git/') ||
+        path.includes('.github/') ||
+        path.endsWith('.ds_store')
+      );
+    });
+
     await executeVercelDeployment(finalFiles);
   };
 
@@ -1504,19 +1527,35 @@ export default function SettingsPanel({
                         </div>
                       </div>
 
-                      <div className="relative">
-                        <input
-                          type="password"
-                          placeholder="Paste your Vercel Access Token (Bearer dpl_...) here"
-                          value={vercelToken}
-                          onChange={(e) => handleSaveVercelToken(e.target.value)}
-                          className="w-full pl-4 pr-16 py-3.5 bg-[#0A0A0B] border border-white/10 rounded-xl text-slate-200 placeholder-slate-700 focus:outline-none focus:border-teal-500 font-mono text-xs"
-                        />
-                        {vercelToken && (
-                          <span className="absolute right-4 top-4 text-[10px] uppercase font-mono font-bold text-teal-400">
-                            Connected
-                          </span>
-                        )}
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono font-bold text-slate-400 block text-left">VERCEL API ACCESS TOKEN</label>
+                          <div className="relative">
+                            <input
+                              type="password"
+                              placeholder="Paste your Vercel Access Token (Bearer dpl_...) here"
+                              value={vercelToken}
+                              onChange={(e) => handleSaveVercelToken(e.target.value)}
+                              className="w-full pl-4 pr-24 py-3 bg-[#0A0A0B] border border-white/10 rounded-xl text-slate-200 placeholder-slate-700 focus:outline-none focus:border-teal-500 font-mono text-xs"
+                            />
+                            {vercelToken && (
+                              <span className="absolute right-4 top-3 text-[10px] uppercase font-mono font-bold text-teal-400">
+                                Connected
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono font-bold text-slate-400 block text-left">VERCEL TEAM ID (OPTIONAL)</label>
+                          <input
+                            type="text"
+                            placeholder="Enter Team ID (team_...) if your projects belong to a Team"
+                            value={vercelTeamId}
+                            onChange={(e) => handleSaveVercelTeamId(e.target.value)}
+                            className="w-full px-4 py-3 bg-[#0A0A0B] border border-white/10 rounded-xl text-slate-200 placeholder-slate-700 focus:outline-none focus:border-teal-500 font-mono text-xs"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2568,133 +2607,6 @@ export default function SettingsPanel({
                       </button>
                     </div>
                   </form>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
-
-          {/* PRE-DEPLOYMENT PERMISSION CHECKLIST MODAL */}
-          <AnimatePresence>
-            {showDeployPermissionModal && pendingDeploymentFiles && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => {
-                    setShowDeployPermissionModal(false);
-                    setPendingDeploymentFiles(null);
-                  }}
-                  className="absolute inset-0 bg-black/85 backdrop-blur-md"
-                />
-                <motion.div
-                  initial={{ scale: 0.95, y: 15, opacity: 0 }}
-                  animate={{ scale: 1, y: 0, opacity: 1 }}
-                  exit={{ scale: 0.95, y: 15, opacity: 0 }}
-                  className="relative w-full max-w-lg bg-[#0F0F12] border border-indigo-500/25 rounded-2xl p-6 shadow-[0_20px_50px_rgba(99,102,241,0.15)] space-y-5 z-10 text-left font-sans"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl">
-                      <ShieldCheck className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-slate-100">Pipeline Deployment Permissions</h3>
-                      <p className="text-xs text-slate-400">Review deployment settings and approve configuration injection</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-[#141418] border border-white/5 rounded-xl p-4 space-y-1.5 font-mono text-[11px] text-slate-400">
-                    <div className="flex justify-between">
-                      <span>Staged files to compile:</span>
-                      <span className="text-indigo-400 font-bold">{pendingDeploymentFiles.length} files</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Deploy Target Server:</span>
-                      <span className="text-slate-200">Vercel Edge Global CDN</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Vercel Project Name:</span>
-                      <span className="text-amber-400">{vercelProjectName}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3.5">
-                    <span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Required Permissions & Automations:</span>
-                    
-                    {/* Item 1: vercel.json */}
-                    <label className="flex items-start gap-3 p-3 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl cursor-pointer select-none transition">
-                      <input
-                        type="checkbox"
-                        checked={permissionAddVercelJson}
-                        onChange={(e) => setPermissionAddVercelJson(e.target.checked)}
-                        className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-white/10 focus:ring-indigo-500 focus:ring-offset-slate-950 mt-0.5"
-                      />
-                      <div className="space-y-0.5">
-                        <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                          Inject SPA Routing Configuration (vercel.json)
-                        </span>
-                        <span className="text-[10px] text-slate-400 leading-normal block">
-                          Creates automatic catch-all rewrites to /index.html if missing, preventing 404 errors when navigating sub-routes.
-                        </span>
-                      </div>
-                    </label>
-
-                    {/* Item 2: cache-busting */}
-                    <label className="flex items-start gap-3 p-3 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl cursor-pointer select-none transition">
-                      <input
-                        type="checkbox"
-                        checked={permissionBypassCache}
-                        onChange={(e) => setPermissionBypassCache(e.target.checked)}
-                        className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-white/10 focus:ring-indigo-500 focus:ring-offset-slate-950 mt-0.5"
-                      />
-                      <div className="space-y-0.5">
-                        <span className="text-xs font-bold text-slate-200">
-                          Bypass CDN Edge Cache
-                        </span>
-                        <span className="text-[10px] text-slate-400 leading-normal block">
-                          Enforces a full source invalidate. Speeds up real-time edge replication so your newest updates load instantly in the browser.
-                        </span>
-                      </div>
-                    </label>
-
-                    {/* Item 3: filter junk */}
-                    <label className="flex items-start gap-3 p-3 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl cursor-pointer select-none transition">
-                      <input
-                        type="checkbox"
-                        checked={permissionFilterJunk}
-                        onChange={(e) => setPermissionFilterJunk(e.target.checked)}
-                        className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-white/10 focus:ring-indigo-500 focus:ring-offset-slate-950 mt-0.5"
-                      />
-                      <div className="space-y-0.5">
-                        <span className="text-xs font-bold text-slate-200">
-                          Exclude Environment / Junk Files
-                        </span>
-                        <span className="text-[10px] text-slate-400 leading-normal block">
-                          Filters out local development noise (node_modules, .git, .DS_Store) to keep the cloud deployment bundle safe, optimized, and small.
-                        </span>
-                      </div>
-                    </label>
-                  </div>
-
-                  <div className="flex gap-2.5 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDeployPermissionModal(false);
-                        setPendingDeploymentFiles(null);
-                      }}
-                      className="flex-1 py-2.5 bg-[#141418] hover:bg-slate-900 text-slate-400 border border-white/5 rounded-xl text-xs font-semibold transition"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={confirmAndStartVercelDeployment}
-                      className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-500/15 transition"
-                    >
-                      Approve & Deploy Live
-                    </button>
-                  </div>
                 </motion.div>
               </div>
             )}

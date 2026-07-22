@@ -17,10 +17,30 @@ interface StatsDashboardProps {
 
 export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
   const [vercelToken, setVercelToken] = useState(() => safeStorage.getItem('REPOSTNOW_VERCEL_TOKEN') || '');
+  const [vercelTeamId, setVercelTeamId] = useState(() => safeStorage.getItem('REPOSTNOW_VERCEL_TEAM_ID') || '');
   const [projects, setProjects] = useState<any[]>([]);
   const [vercelUser, setVercelUser] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // UX tracking states for deletions
+  const [deletingProjectIds, setDeletingProjectIds] = useState<string[]>([]);
+  const [deletingDomainNames, setDeletingDomainNames] = useState<string[]>([]);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    isDanger?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    onConfirm: () => {},
+    confirmText: 'Confirm',
+    isDanger: false,
+  });
   
   // Custom domains configuration state
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -29,28 +49,9 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
   const [domainLoading, setDomainLoading] = useState(false);
   const [domainError, setDomainError] = useState<string | null>(null);
 
-  // History tracking states
-  const [deployHistory, setDeployHistory] = useState<any[]>([]);
-  const [repoHistory, setRepoHistory] = useState<any[]>([]);
-  const [selectedLogsEntry, setSelectedLogsEntry] = useState<any | null>(null);
-  const [showAllDeploymentsModal, setShowAllDeploymentsModal] = useState(false);
-  const [logsExpandedEntryId, setLogsExpandedEntryId] = useState<string | null>(null);
-
-  // Load local storage history on mount
-  useEffect(() => {
-    try {
-      const deployStored = localStorage.getItem('repostnow_deployment_history');
-      if (deployStored) {
-        setDeployHistory(JSON.parse(deployStored));
-      }
-      const repoStored = localStorage.getItem('repostnow_repo_history');
-      if (repoStored) {
-        setRepoHistory(JSON.parse(repoStored));
-      }
-    } catch (e) {
-      console.error('Failed to parse history:', e);
-    }
-  }, []);
+  // Vercel Projects Modal state
+  const [showAllProjectsModal, setShowAllProjectsModal] = useState(false);
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
 
   const [totalQueries, setTotalQueries] = useState(() => {
     return Number(localStorage.getItem('repostnow_queries_count') || '148');
@@ -129,12 +130,30 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Load Vercel status on mount or token change
+  // Synchronize token and team ID from safeStorage periodically to avoid stale settings
+  useEffect(() => {
+    const syncToken = () => {
+      const storedToken = safeStorage.getItem('REPOSTNOW_VERCEL_TOKEN') || '';
+      const storedTeamId = safeStorage.getItem('REPOSTNOW_VERCEL_TEAM_ID') || '';
+      if (storedToken !== vercelToken) {
+        setVercelToken(storedToken);
+      }
+      if (storedTeamId !== vercelTeamId) {
+        setVercelTeamId(storedTeamId);
+      }
+    };
+    
+    syncToken();
+    const interval = setInterval(syncToken, 1500);
+    return () => clearInterval(interval);
+  }, [vercelToken, vercelTeamId]);
+
+  // Load Vercel status on mount, token or team change
   useEffect(() => {
     if (vercelToken) {
       fetchVercelData();
     }
-  }, [vercelToken]);
+  }, [vercelToken, vercelTeamId]);
 
   const fetchVercelData = async () => {
     setLoading(true);
@@ -150,7 +169,8 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
       }
 
       // 2. Fetch projects
-      const projRes = await fetch('/api/proxy-vercel-projects', {
+      const projUrl = `/api/proxy-vercel-projects${vercelTeamId ? `?teamId=${vercelTeamId}` : ''}`;
+      const projRes = await fetch(projUrl, {
         headers: { 'x-vercel-token': vercelToken }
       });
       if (!projRes.ok) {
@@ -173,7 +193,8 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
 
   const fetchDomainsForProject = async (projId: string) => {
     try {
-      const res = await fetch(`/api/proxy-vercel-projects/${projId}/domains`, {
+      const url = `/api/proxy-vercel-projects/${projId}/domains${vercelTeamId ? `?teamId=${vercelTeamId}` : ''}`;
+      const res = await fetch(url, {
         headers: { 'x-vercel-token': vercelToken }
       });
       if (res.ok) {
@@ -190,7 +211,8 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
     setDomainLoading(true);
     setDomainError(null);
     try {
-      const res = await fetch(`/api/proxy-vercel-projects/${projId}/domains`, {
+      const url = `/api/proxy-vercel-projects/${projId}/domains${vercelTeamId ? `?teamId=${vercelTeamId}` : ''}`;
+      const res = await fetch(url, {
         method: 'POST',
         headers: {
           'x-vercel-token': vercelToken,
@@ -212,45 +234,220 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
   };
 
   const handleDeleteDomain = async (projId: string, domainName: string) => {
-    if (!confirm(`Are you sure you want to delete domain "${domainName}"?`)) return;
-    try {
-      const res = await fetch(`/api/proxy-vercel-projects/${projId}/domains/${domainName}`, {
-        method: 'DELETE',
-        headers: { 'x-vercel-token': vercelToken }
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error?.message || 'Failed to delete domain');
+    const domainKey = `${projId}:${domainName}`;
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Hapus Domain Kustom',
+      description: `Apakah Anda yakin ingin menghapus domain kustom "${domainName}" dari project ini?`,
+      confirmText: 'Ya, Hapus Domain',
+      isDanger: true,
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        setDeletingDomainNames(prev => [...prev, domainKey]);
+        try {
+          const url = `/api/proxy-vercel-projects/${projId}/domains/${domainName}${vercelTeamId ? `?teamId=${vercelTeamId}` : ''}`;
+          const res = await fetch(url, {
+            method: 'DELETE',
+            headers: { 'x-vercel-token': vercelToken }
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error?.message || 'Gagal menghapus domain');
+          }
+          await fetchDomainsForProject(projId);
+        } catch (err: any) {
+          alert(err.message || 'Terjadi kesalahan saat menghapus domain.');
+        } finally {
+          setDeletingDomainNames(prev => prev.filter(k => k !== domainKey));
+        }
       }
-      await fetchDomainsForProject(projId);
-    } catch (err: any) {
-      alert(err.message);
-    }
+    });
   };
 
   const handleDeleteProject = async (projId: string, projName: string) => {
-    if (!confirm(`⚠️ DANGER: Are you sure you want to delete project "${projName}"? This deletes all associated deployments, custom domains, and cannot be undone.`)) return;
-    try {
-      const res = await fetch(`/api/proxy-vercel-projects/${projId}`, {
-        method: 'DELETE',
-        headers: { 'x-vercel-token': vercelToken }
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error?.message || 'Failed to delete project');
+    setConfirmDialog({
+      isOpen: true,
+      title: '⚠️ HAPUS PROJECT VERCEL (PERMANEN)',
+      description: `Apakah Anda yakin ingin menghapus project "${projName}"? Tindakan ini akan menghapus semua deployment, domain kustom, sertifikat, dan tidak dapat dibatalkan.`,
+      confirmText: 'Ya, Hapus Permanen',
+      isDanger: true,
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        setDeletingProjectIds(prev => [...prev, projId]);
+        try {
+          const url = `/api/proxy-vercel-projects/${projId}${vercelTeamId ? `?teamId=${vercelTeamId}` : ''}`;
+          const res = await fetch(url, {
+            method: 'DELETE',
+            headers: { 'x-vercel-token': vercelToken }
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error?.message || 'Gagal menghapus project');
+          }
+          setProjects(prev => prev.filter(p => p.id !== projId));
+          alert(`Project "${projName}" berhasil dihapus dari akun Vercel Anda.`);
+        } catch (err: any) {
+          alert(err.message || 'Terjadi kesalahan saat menghapus project.');
+        } finally {
+          setDeletingProjectIds(prev => prev.filter(id => id !== projId));
+        }
       }
-      setProjects(prev => prev.filter(p => p.id !== projId));
-      alert(`Project "${projName}" successfully deleted from Vercel.`);
-    } catch (err: any) {
-      alert(err.message);
-    }
+    });
   };
 
   const handleSaveTokenManually = (e: React.FormEvent) => {
     e.preventDefault();
     if (!vercelToken.trim()) return;
     safeStorage.setItem('REPOSTNOW_VERCEL_TOKEN', vercelToken.trim());
+    if (vercelTeamId.trim()) {
+      safeStorage.setItem('REPOSTNOW_VERCEL_TEAM_ID', vercelTeamId.trim());
+    } else {
+      safeStorage.removeItem('REPOSTNOW_VERCEL_TEAM_ID');
+    }
     fetchVercelData();
+  };
+
+  const renderProjectCard = (project: any) => {
+    const domains = projectDomains[project.id] || [];
+    const latestDeployment = project.latestDeployments?.[0];
+    const createdDate = new Date(project.createdAt).toLocaleString();
+    const updateDate = latestDeployment ? new Date(latestDeployment.createdAt).toLocaleString() : 'N/A';
+
+    return (
+      <div key={project.id} className="bg-[#0C0C0F] border border-white/5 hover:border-white/10 rounded-2xl p-5 flex flex-col justify-between transition group space-y-4">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3 border-b border-white/5 pb-3">
+            <div className="text-left min-w-0 flex-1">
+              <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-indigo-400">PROJECT</span>
+              <h4 className="text-sm font-bold text-slate-100 mt-0.5 truncate" title={project.name}>{project.name}</h4>
+            </div>
+            <button
+              onClick={() => handleDeleteProject(project.id, project.name)}
+              disabled={deletingProjectIds.includes(project.id)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-red-500/10 hover:bg-red-600 disabled:opacity-50 text-red-400 hover:text-white border border-red-500/20 hover:border-red-600 rounded-xl text-[10px] font-sans font-bold transition-all shadow-md shrink-0 cursor-pointer"
+              title="Hapus Project dari Vercel"
+            >
+              {deletingProjectIds.includes(project.id) ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="w-3.5 h-3.5" />
+              )}
+              <span>{deletingProjectIds.includes(project.id) ? 'Menghapus...' : 'Hapus Project'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-[10px] font-mono p-2.5 bg-[#141417]/60 rounded-xl border border-white/5">
+            <div>
+              <span className="text-slate-500">Framework:</span>{' '}
+              <span className="text-slate-300">{project.framework || 'Vite/SPA'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Node Version:</span>{' '}
+              <span className="text-slate-300">{project.nodeVersion || '20.x'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Created:</span>{' '}
+              <span className="text-slate-400 block truncate">{createdDate}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Last Deploy:</span>{' '}
+              <span className="text-slate-400 block truncate">{updateDate}</span>
+            </div>
+          </div>
+
+          {/* DOMAINS SECTION */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-bold text-slate-400 flex items-center gap-1">
+                <Globe className="w-3.5 h-3.5 text-slate-500" />
+                <span>Domains ({domains.length})</span>
+              </span>
+              <button
+                onClick={() => setActiveProjectId(activeProjectId === project.id ? null : project.id)}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-bold transition-colors"
+              >
+                {activeProjectId === project.id ? 'Tutup ×' : '+ Tambah Domain'}
+              </button>
+            </div>
+
+            {activeProjectId === project.id && (
+              <div className="space-y-2 p-3 bg-[#141417]/80 rounded-xl border border-white/5">
+                <p className="text-[10px] text-slate-400">Specify domain name (e.g. static-demo.vercel.app):</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="domain.com"
+                    value={newDomainName}
+                    onChange={(e) => setNewDomainName(e.target.value)}
+                    className="flex-grow px-2 py-1 bg-black/60 border border-white/10 rounded-lg text-xs text-slate-200 font-mono"
+                  />
+                  <button
+                    onClick={() => handleAddDomain(project.id)}
+                    disabled={domainLoading}
+                    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition animate-pulse"
+                  >
+                    Tambah
+                  </button>
+                </div>
+                {domainError && <p className="text-[9px] text-red-400 font-mono">{domainError}</p>}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              {domains.map((d: any) => (
+                <div key={d.name} className="flex items-center justify-between gap-3 px-3 py-2 bg-[#141417] border border-white/5 rounded-xl text-[10px] font-mono text-slate-300 hover:bg-[#1a1a1f] transition-all">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                    <a
+                      href={`https://${d.name}`}
+                      target="_blank"
+                      referrerPolicy="no-referrer"
+                      className="hover:underline flex items-center gap-1 truncate text-slate-200 font-semibold"
+                    >
+                      <span className="truncate">{d.name}</span>
+                      <ExternalLink className="w-2.5 h-2.5 text-slate-500" />
+                    </a>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteDomain(project.id, d.name)}
+                    disabled={deletingDomainNames.includes(`${project.id}:${d.name}`)}
+                    className="p-1.5 bg-red-500/10 hover:bg-red-600 disabled:opacity-50 text-red-400 hover:text-white border border-red-500/10 hover:border-red-600 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0"
+                    title="Hapus Domain"
+                  >
+                    {deletingDomainNames.includes(`${project.id}:${d.name}`) ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3 h-3" />
+                    )}
+                    <span className="text-[9px] font-sans font-bold">
+                      {deletingDomainNames.includes(`${project.id}:${d.name}`) ? 'Menghapus...' : 'Hapus'}
+                    </span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {latestDeployment && (
+          <div className="pt-3 border-t border-white/5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${latestDeployment.status === 'READY' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+              <span className="text-[10px] text-slate-400 font-mono">Status: {latestDeployment.status}</span>
+            </div>
+            <a
+              href={`https://${latestDeployment.url}`}
+              target="_blank"
+              referrerPolicy="no-referrer"
+              className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold"
+            >
+              <span>View Live</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Compute staged file types and sizes
@@ -359,17 +556,31 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
                 Connect your Vercel Token to view live projects, configure custom domains, delete test deployments, and see real-time limits.
               </p>
             </div>
-            <div className="flex w-full max-w-md gap-2">
-              <input
-                type="password"
-                placeholder="Enter Vercel User Token (Bearer)..."
-                value={vercelToken}
-                onChange={(e) => setVercelToken(e.target.value)}
-                className="flex-grow px-3.5 py-2 text-xs font-mono bg-black/60 border border-white/10 rounded-xl text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
+            <div className="w-full max-w-md space-y-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono font-bold text-slate-400 block text-left">VERCEL API TOKEN *</label>
+                <input
+                  type="password"
+                  placeholder="Paste your Vercel Access Token (Bearer dpl_...)"
+                  value={vercelToken}
+                  onChange={(e) => setVercelToken(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs font-mono bg-black/60 border border-white/10 rounded-xl text-slate-200 focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono font-bold text-slate-400 block text-left">VERCEL TEAM ID (OPTIONAL - FOR TEAM PROJECTS)</label>
+                <input
+                  type="text"
+                  placeholder="Enter Team ID if your projects are under a Vercel Team (e.g. team_...)"
+                  value={vercelTeamId}
+                  onChange={(e) => setVercelTeamId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs font-mono bg-black/60 border border-white/10 rounded-xl text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
               <button
                 type="submit"
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition flex-shrink-0"
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition"
               >
                 Connect API
               </button>
@@ -391,146 +602,66 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
             <p className="text-xs">No active Vercel projects found on this token account.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {projects.map((project) => {
-              const domains = projectDomains[project.id] || [];
-              const latestDeployment = project.latestDeployments?.[0];
-              const createdDate = new Date(project.createdAt).toLocaleString();
-              const updateDate = latestDeployment ? new Date(latestDeployment.createdAt).toLocaleString() : 'N/A';
-
-              return (
-                <div key={project.id} className="bg-[#0C0C0F] border border-white/5 hover:border-white/10 rounded-2xl p-5 flex flex-col justify-between transition group space-y-4">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-left">
-                        <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-indigo-400">PROJECT</span>
-                        <h4 className="text-sm font-bold text-slate-100 mt-0.5">{project.name}</h4>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteProject(project.id, project.name)}
-                        className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg border border-red-500/10 transition opacity-0 group-hover:opacity-100 focus:opacity-100"
-                        title="Delete project from Vercel"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[10px] font-mono p-2.5 bg-[#141417]/60 rounded-xl border border-white/5">
-                      <div>
-                        <span className="text-slate-500">Framework:</span>{' '}
-                        <span className="text-slate-300">{project.framework || 'Vite/SPA'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Node Version:</span>{' '}
-                        <span className="text-slate-300">{project.nodeVersion || '20.x'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Created:</span>{' '}
-                        <span className="text-slate-400 block truncate">{createdDate}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Last Deploy:</span>{' '}
-                        <span className="text-slate-400 block truncate">{updateDate}</span>
-                      </div>
-                    </div>
-
-                    {/* DOMAINS SECTION */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-bold text-slate-400">Domains ({domains.length})</span>
-                        <button
-                          onClick={() => setActiveProjectId(activeProjectId === project.id ? null : project.id)}
-                          className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
-                        >
-                          {activeProjectId === project.id ? 'Close' : '+ Add Domain'}
-                        </button>
-                      </div>
-
-                      {activeProjectId === project.id && (
-                        <div className="space-y-2 p-3 bg-[#141417]/80 rounded-xl border border-white/5">
-                          <p className="text-[10px] text-slate-400">Specify domain name (e.g. static-demo.vercel.app):</p>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              placeholder="domain.com"
-                              value={newDomainName}
-                              onChange={(e) => setNewDomainName(e.target.value)}
-                              className="flex-grow px-2 py-1 bg-black/60 border border-white/10 rounded-lg text-xs text-slate-200 font-mono"
-                            />
-                            <button
-                              onClick={() => handleAddDomain(project.id)}
-                              disabled={domainLoading}
-                              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition"
-                            >
-                              Add
-                            </button>
-                          </div>
-                          {domainError && <p className="text-[9px] text-red-400 font-mono">{domainError}</p>}
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap gap-1.5">
-                        {domains.map((d: any) => (
-                          <div key={d.name} className="flex items-center gap-1.5 px-2 py-1 bg-[#141417] border border-white/5 rounded-lg text-[10px] font-mono text-slate-300">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            <a
-                              href={`https://${d.name}`}
-                              target="_blank"
-                              referrerPolicy="no-referrer"
-                              className="hover:underline flex items-center gap-1"
-                            >
-                              <span>{d.name}</span>
-                              <ExternalLink className="w-2.5 h-2.5 text-slate-500" />
-                            </a>
-                            <button
-                              onClick={() => handleDeleteDomain(project.id, d.name)}
-                              className="text-red-500 hover:text-red-400 font-bold ml-1.5"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {latestDeployment && (
-                    <div className="pt-3 border-t border-white/5 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${latestDeployment.status === 'READY' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
-                        <span className="text-[10px] text-slate-400 font-mono">Status: {latestDeployment.status}</span>
-                      </div>
-                      <a
-                        href={`https://${latestDeployment.url}`}
-                        target="_blank"
-                        referrerPolicy="no-referrer"
-                        className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold"
-                      >
-                        <span>View Live</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {projects.slice(0, 3).map((project) => renderProjectCard(project))}
+            </div>
+            
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAllProjectsModal(true)}
+                className="w-full sm:w-auto px-6 py-3 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/10 hover:border-indigo-500/30 text-indigo-400 hover:text-indigo-300 font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2"
+              >
+                <Layers className="w-4.5 h-4.5" />
+                <span>Kelola & Lihat Semua Project ({projects.length})</span>
+              </button>
+            </div>
           </div>
         )}
 
         {/* Vercel user Limits block */}
         {vercelUser && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-4 border-t border-white/5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-white/5">
             <div className="p-3 bg-black/30 border border-white/5 rounded-xl text-[10px] font-mono text-left">
               <span className="text-slate-500 uppercase block">Vercel User:</span>
-              <span className="text-slate-300 font-bold mt-0.5 block">{vercelUser.username || vercelUser.name || 'Personal Account'}</span>
+              <span className="text-slate-300 font-bold mt-0.5 block truncate">{vercelUser.username || vercelUser.name || 'Personal Account'}</span>
             </div>
             <div className="p-3 bg-black/30 border border-white/5 rounded-xl text-[10px] font-mono text-left">
               <span className="text-slate-500 uppercase block">Billing Plan:</span>
-              <span className="text-slate-300 font-bold mt-0.5 block capitalize">{vercelUser.billing?.plan || 'Hobby / Free Tier'}</span>
+              <span className="text-slate-300 font-bold mt-0.5 block capitalize truncate">{vercelUser.billing?.plan || 'Hobby / Free Tier'}</span>
             </div>
             <div className="p-3 bg-black/30 border border-white/5 rounded-xl text-[10px] font-mono text-left">
-              <span className="text-slate-500 uppercase block">Projects Limit:</span>
-              <span className="text-slate-300 font-bold mt-0.5 block">Unlimited / Soft limit (Hobby)</span>
+              <span className="text-slate-500 uppercase block">Team Context:</span>
+              <span className="text-amber-400 font-bold mt-0.5 block truncate">{vercelTeamId ? vercelTeamId : 'Personal Space'}</span>
+            </div>
+            <div className="p-3 bg-[#0a0a0c] border border-white/10 rounded-xl text-[10px] font-mono text-left flex flex-col justify-between">
+              <span className="text-slate-400 uppercase block font-semibold">Change Team ID:</span>
+              <div className="flex gap-1.5 mt-1.5">
+                <input
+                  type="text"
+                  placeholder="None (Personal)"
+                  value={vercelTeamId}
+                  onChange={(e) => {
+                    const val = e.target.value.trim();
+                    setVercelTeamId(val);
+                    safeStorage.setItem('REPOSTNOW_VERCEL_TEAM_ID', val);
+                  }}
+                  className="w-full bg-black/60 border border-white/10 rounded px-2 py-1 text-[9px] font-mono text-slate-300 focus:outline-none focus:border-indigo-500"
+                />
+                {vercelTeamId && (
+                  <button
+                    onClick={() => {
+                      setVercelTeamId('');
+                      safeStorage.removeItem('REPOSTNOW_VERCEL_TEAM_ID');
+                    }}
+                    className="px-2 py-1 bg-red-500/10 hover:bg-red-600 text-red-400 hover:text-white rounded text-[8px] font-sans font-bold transition-colors cursor-pointer shrink-0"
+                    title="Clear Team ID"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -744,251 +875,125 @@ export default function StatsDashboard({ stagedFiles }: StatsDashboardProps) {
         </div>
       </div>
 
-      {/* HISTORIES: DEPLOYMENTS & REPOSITORIES */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* COLUMN 1: DEPLOYMENT LOGS HISTORY */}
-        <div className="bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl flex flex-col justify-between space-y-4">
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <History className="w-5 h-5 text-indigo-400" />
-              <span>Riwayat Deploy Vercel</span>
-            </h3>
-            <p className="text-slate-500 text-xs">Menampilkan 3 deploy terbaru beserta log lengkap pipeline build.</p>
-          </div>
-
-          <div className="flex-1 space-y-3">
-            {deployHistory.length === 0 ? (
-              <div className="py-8 text-center text-slate-500 border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center space-y-2">
-                <Terminal className="w-8 h-8 text-slate-600 opacity-50" />
-                <p className="text-xs text-slate-400">Belum ada riwayat deployment.</p>
-              </div>
-            ) : (
-              deployHistory.slice(0, 3).map((item) => (
-                <div key={item.id} className="bg-[#0C0C0F] border border-white/5 rounded-xl p-4 space-y-3 text-left">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-amber-500">PROJECT DEPLOY</span>
-                      <h4 className="text-xs font-bold text-slate-200 mt-0.5">{item.projectName}</h4>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                        item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      }`}>
-                        {item.status === 'success' ? 'SUCCESS' : 'FAILED'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 text-[10px] font-mono text-slate-500">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                      {item.timestamp}
-                    </span>
-                    {item.url && (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        referrerPolicy="no-referrer"
-                        className="flex items-center gap-1 text-indigo-400 hover:underline"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Live Link
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Inline quick-toggle to see last 3 log statements */}
-                  <div className="space-y-1.5">
-                    <button
-                      onClick={() => setLogsExpandedEntryId(logsExpandedEntryId === item.id ? null : item.id)}
-                      className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-slate-200"
-                    >
-                      <span>{logsExpandedEntryId === item.id ? 'Sembunyikan Logs' : 'Lihat Logs Terbaru'}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${logsExpandedEntryId === item.id ? 'rotate-180' : ''}`} />
-                    </button>
-
-                    {logsExpandedEntryId === item.id && (
-                      <div className="bg-slate-950 rounded-lg p-3 font-mono text-[10px] text-slate-300 border border-white/5 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
-                        {item.logs && item.logs.length > 0 ? (
-                          item.logs.map((log: string, lIdx: number) => (
-                            <div key={lIdx} className="truncate select-text">
-                              {log}
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-slate-500 italic">Tidak ada log tercatat.</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {deployHistory.length > 0 && (
-            <button
-              onClick={() => setShowAllDeploymentsModal(true)}
-              className="w-full py-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 hover:text-indigo-300 font-bold border border-indigo-500/10 rounded-xl text-xs transition"
-            >
-              Lihat Semua Log Deploy ({deployHistory.length})
-            </button>
-          )}
-        </div>
-
-        {/* COLUMN 2: REPOSITORY ADDITIONS HISTORY */}
-        <div className="bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl flex flex-col justify-between space-y-4">
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <History className="w-5 h-5 text-emerald-400" />
-              <span>Riwayat Penambahan Repos</span>
-            </h3>
-            <p className="text-slate-500 text-xs">Menampilkan daftar repositori yang baru ditambahkan atau di-push.</p>
-          </div>
-
-          <div className="flex-1 space-y-3 overflow-y-auto max-h-[360px] custom-scrollbar pr-1">
-            {repoHistory.length === 0 ? (
-              <div className="py-12 text-center text-slate-500 border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center space-y-2">
-                <Database className="w-8 h-8 text-slate-600 opacity-50" />
-                <p className="text-xs text-slate-400">Belum ada riwayat penambahan repositori.</p>
-              </div>
-            ) : (
-              repoHistory.map((item) => (
-                <div key={item.id} className="bg-[#0C0C0F] border border-white/5 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="text-xs font-bold text-slate-200">{item.repoName}</h4>
-                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
-                        item.isPrivate ? 'bg-red-500/10 text-red-400 border border-red-500/10' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10'
-                      }`}>
-                        {item.isPrivate ? 'PRIVATE' : 'PUBLIC'}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-400">Owner: @{item.owner}</p>
-                    <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500 mt-1">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3.5 h-3.5" />
-                        {item.timestamp}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-right flex sm:flex-col items-start sm:items-end justify-between font-mono text-[10px]">
-                    <span className="text-slate-500">Staged Push files:</span>
-                    <span className="text-indigo-400 font-bold sm:mt-0.5">{item.filesCount} assets</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* SECURE DIRECT browser pipelines info */}
-      <div className="bg-[#141417] border border-white/5 rounded-3xl p-6 shadow-2xl space-y-4">
-        <div>
-          <h4 className="font-bold text-slate-100 text-sm flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-indigo-400" />
-            <span>Encrypted Direct-to-GitHub Pipeline</span>
-          </h4>
-          <p className="text-slate-500 text-xs mt-1 leading-relaxed">
-            All files staged are processed completely client-side in your secure browser sandbox. RepostNow initiates direct pipelines to GitHub with TLS 1.3 encryption, ensuring your files never touch any intermediary hosting servers, logs, or databases.
-          </p>
-        </div>
-      </div>
-
-      {/* FULL SCREEN / MODAL POPUP FOR ALL DEPLOYMENT LOGS */}
-      {showAllDeploymentsModal && (
+      {/* FULL SCREEN / MODAL POPUP FOR ALL VERCEL PROJECTS */}
+      {showAllProjectsModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div
-            onClick={() => setShowAllDeploymentsModal(false)}
+            onClick={() => setShowAllProjectsModal(false)}
             className="absolute inset-0 bg-black/85 backdrop-blur-md"
           />
-          <div className="relative w-full max-w-3xl max-h-[85vh] bg-[#0F0F12] border border-white/10 rounded-2xl flex flex-col shadow-2xl z-10 overflow-hidden text-left font-sans">
+          <div className="relative w-full max-w-5xl max-h-[85vh] bg-[#0F0F12] border border-white/10 rounded-2xl flex flex-col shadow-2xl z-10 overflow-hidden text-left font-sans">
             {/* Modal Header */}
             <div className="p-4 bg-[#141418] border-b border-white/5 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl">
-                  <History className="w-5 h-5" />
+                  <Globe className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-100">Semua Log & Riwayat Deployment</h3>
-                  <p className="text-xs text-slate-400">Arsip lengkap performa kompilasi pipeline cloud studio</p>
+                  <h3 className="text-sm font-bold text-slate-100">Semua Project Vercel Anda</h3>
+                  <p className="text-xs text-slate-400">Daftar lengkap integrasi, domain kustom, status deployment, dan kontrol penghapusan.</p>
                 </div>
               </div>
               <button
-                onClick={() => setShowAllDeploymentsModal(false)}
+                onClick={() => setShowAllProjectsModal(false)}
                 className="p-1.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
+            {/* Filter / Search Bar */}
+            <div className="p-4 bg-[#111115] border-b border-white/5 flex flex-col sm:flex-row gap-3 items-center justify-between">
+              <div className="relative w-full sm:max-w-xs">
+                <input
+                  type="text"
+                  placeholder="Cari project..."
+                  value={projectSearchQuery}
+                  onChange={(e) => setProjectSearchQuery(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-black/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 font-sans focus:outline-none focus:border-indigo-500"
+                />
+                {projectSearchQuery && (
+                  <button
+                    onClick={() => setProjectSearchQuery('')}
+                    className="absolute right-2.5 top-2 text-slate-400 hover:text-white text-xs font-bold"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400 font-mono">
+                Menampilkan {projects.filter(p => p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())).length} dari {projects.length} project
+              </div>
+            </div>
+
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar bg-[#09090B]">
-              {deployHistory.map((item) => (
-                <div key={item.id} className="bg-[#121216] border border-white/5 rounded-xl p-4.5 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <span className="text-[9px] uppercase font-mono font-bold tracking-widest text-amber-500 block">Vercel Build Environment</span>
-                      <h4 className="text-sm font-bold text-slate-200 mt-0.5">{item.projectName}</h4>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        {item.timestamp}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                        item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                      }`}>
-                        {item.status === 'success' ? 'SUCCESS' : 'FAILED'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {item.url && (
-                    <div className="text-[10px] font-mono text-indigo-400">
-                      <span>Live CDN:</span>{' '}
-                      <a href={item.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                        {item.url}
-                      </a>
-                    </div>
-                  )}
-
-                  {/* Log statements */}
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Kompilasi Pipeline Output:</span>
-                    <div className="bg-black/80 rounded-xl p-4 font-mono text-[11px] leading-5 text-indigo-200 border border-white/5 max-h-48 overflow-y-auto custom-scrollbar select-text">
-                      {item.logs && item.logs.length > 0 ? (
-                        item.logs.map((log: string, lIdx: number) => (
-                          <div key={lIdx} className="whitespace-pre-wrap truncate">
-                            {log}
-                          </div>
-                        ))
-                      ) : (
-                        <span className="text-slate-500 italic">Tidak ada output log tercatat.</span>
-                      )}
-                    </div>
-                  </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[#09090B]">
+              {projects.filter(p => p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())).length === 0 ? (
+                <div className="py-16 text-center text-slate-500 border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center space-y-2">
+                  <Layers className="w-10 h-10 text-slate-600 opacity-50" />
+                  <p className="text-xs text-slate-400">Tidak ada project yang cocok dengan pencarian Anda.</p>
                 </div>
-              ))}
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {projects
+                    .filter(p => p.name.toLowerCase().includes(projectSearchQuery.toLowerCase()))
+                    .map((project) => renderProjectCard(project))}
+                </div>
+              )}
             </div>
 
             {/* Modal Footer */}
             <div className="p-4 bg-[#141418] border-t border-white/5 flex items-center justify-between font-mono text-[10px] text-slate-500">
-              <span>Arsip tersimpan aman di browser sandbox lokal Anda</span>
+              <span>Total {projects.length} Project terintegrasi aman di Vercel</span>
               <button
-                onClick={() => {
-                  if (confirm('Apakah Anda yakin ingin menghapus semua riwayat logs deployment?')) {
-                    localStorage.removeItem('repostnow_deployment_history');
-                    setDeployHistory([]);
-                    setShowAllDeploymentsModal(false);
-                  }
-                }}
-                className="text-red-400 hover:text-red-300 font-bold transition hover:underline"
+                onClick={() => setShowAllProjectsModal(false)}
+                className="text-indigo-400 hover:text-indigo-300 font-bold transition hover:underline"
               >
-                Hapus Semua Log
+                Selesai
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Confirmation Dialog Modal */}
+      {confirmDialog.isOpen && (
+        <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#121216] border border-white/10 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl animate-scaleUp">
+            <div className="p-5 border-b border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl ${confirmDialog.isDanger ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-100">{confirmDialog.title}</h3>
+              </div>
+              <button
+                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                className="p-1 text-slate-400 hover:text-white rounded-lg transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                {confirmDialog.description}
+              </p>
+            </div>
+            <div className="p-4 bg-[#18181f] border-t border-white/5 flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmDialog.onConfirm}
+                className={`px-4 py-2 text-white text-xs font-bold rounded-xl transition shadow-lg cursor-pointer ${
+                  confirmDialog.isDanger
+                    ? 'bg-red-600 hover:bg-red-500 shadow-red-900/30'
+                    : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/30'
+                }`}
+              >
+                {confirmDialog.confirmText || 'Konfirmasi'}
               </button>
             </div>
           </div>

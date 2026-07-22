@@ -127,7 +127,7 @@ async function startServer() {
       }
 
       // Use the recommended standard high-performance model
-      const modelName = "gemini-3.5-flash";
+      const modelName = "gemini-3.6-flash";
 
       const result = await googleAi.models.generateContent({
         model: modelName,
@@ -184,7 +184,7 @@ async function startServer() {
   // GET: Vercel Deployments list for history tracking
   app.get('/api/proxy-vercel-deployments-list', async (req, res) => {
     const token = req.headers['x-vercel-token'];
-    const { projectId, limit } = req.query;
+    const { projectId, limit, teamId } = req.query;
     if (!token) {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
@@ -193,6 +193,7 @@ async function startServer() {
       const params = new URLSearchParams();
       if (projectId) params.append('projectId', projectId as string);
       if (limit) params.append('limit', limit as string);
+      if (teamId) params.append('teamId', teamId as string);
       
       const queryString = params.toString();
       if (queryString) url += `?${queryString}`;
@@ -252,7 +253,9 @@ async function startServer() {
     }
     
     try {
-      const response = await fetch('https://api.vercel.com/v2/files', {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v2/files${queryParams ? `?${queryParams}` : ''}`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -277,7 +280,9 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
     try {
-      const response = await fetch('https://api.vercel.com/v13/deployments', {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v13/deployments${queryParams ? `?${queryParams}` : ''}`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -301,7 +306,9 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
     try {
-      const response = await fetch(`https://api.vercel.com/v13/deployments/${id}`, {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v13/deployments/${id}${queryParams ? `?${queryParams}` : ''}`;
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -321,7 +328,9 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
     try {
-      const response = await fetch('https://api.vercel.com/v9/projects', {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v9/projects${queryParams ? `?${queryParams}` : ''}`;
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         }
@@ -341,7 +350,10 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
     try {
-      const response = await fetch(`https://api.vercel.com/v9/projects/${id}`, {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v9/projects/${id}${queryParams ? `?${queryParams}` : ''}`;
+      
+      const response = await fetch(url, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -350,7 +362,13 @@ async function startServer() {
       if (response.status === 204) {
         return res.status(204).send();
       }
-      const data = await response.json();
+      const text = await response.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : { success: true };
+      } catch {
+        data = { success: true };
+      }
       res.status(response.status).json(data);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -365,7 +383,9 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
     try {
-      const response = await fetch(`https://api.vercel.com/v9/projects/${idOrName}/domains`, {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v9/projects/${idOrName}/domains${queryParams ? `?${queryParams}` : ''}`;
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         }
@@ -385,7 +405,9 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
     try {
-      const response = await fetch(`https://api.vercel.com/v9/projects/${idOrName}/domains`, {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v9/projects/${idOrName}/domains${queryParams ? `?${queryParams}` : ''}`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -408,13 +430,25 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing x-vercel-token header' });
     }
     try {
-      const response = await fetch(`https://api.vercel.com/v9/projects/${idOrName}/domains/${domain}`, {
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `https://api.vercel.com/v9/projects/${idOrName}/domains/${domain}${queryParams ? `?${queryParams}` : ''}`;
+      
+      const response = await fetch(url, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
         }
       });
-      const data = await response.json();
+      if (response.status === 204) {
+        return res.status(204).send();
+      }
+      const text = await response.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : { success: true };
+      } catch {
+        data = { success: true };
+      }
       res.status(response.status).json(data);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

@@ -372,86 +372,40 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
   const isFormValid = !!(user && repoConfig && (repoConfig.mode === 'existing' ? !!repoConfig.selectedRepoFullName : !!repoConfig.name));
 
   return (
-    <div className="min-h-screen bg-[#070709] text-slate-100 flex flex-col md:flex-row selection:bg-indigo-500/30 selection:text-indigo-300 relative overflow-x-hidden">
+    <div className="h-screen w-screen overflow-hidden bg-[#070709] text-slate-100 flex flex-col selection:bg-indigo-500/30 selection:text-indigo-300 relative">
       {/* Decorative Background Accents */}
       <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none z-0" />
       <div className="absolute bottom-10 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none z-0" />
 
-      {/* DESKTOP SIDEBAR NAVIGATION RAIL */}
-      <aside className="hidden md:flex w-64 border-r border-white/5 bg-[#09090C] flex-col p-5 flex-shrink-0 z-30 sticky top-0 h-screen justify-between">
-        <div className="space-y-6">
-          {/* Logo */}
-          <div className="flex items-center gap-3 border-b border-white/5 pb-5">
-            <div className="p-2.5 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-xl shadow-lg shadow-indigo-500/10 flex items-center justify-center">
-              <FolderGit className="w-5 h-5 text-white" />
-            </div>
-            <div className="text-left">
-              <h1 className="text-sm font-extrabold text-white tracking-tight font-sans">RepostNow</h1>
-              <p className="text-[10px] text-indigo-400 font-mono tracking-wider">CODE ENGINE v1.2.0</p>
-            </div>
-          </div>
-
-          {/* Navigation Links */}
-          <div className="space-y-1">
-            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest font-bold px-3 block mb-2">Workspace Modules</span>
-            
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'dashboard' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
-            >
-              <LayoutGrid className="w-4 h-4" />
-              <span>Dashboard Workspace</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('ai')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'ai' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>AI Coding Assistant</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('stats')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'stats' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
-            >
-              <TrendingUp className="w-4 h-4" />
-              <span>Analytics & Stats</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition text-left ${activeTab === 'settings' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
-            >
-              <Sliders className="w-4 h-4" />
-              <span>Settings & Repos Config</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Bottom Sidebar Action & Profile */}
-        <div className="space-y-4 pt-4 border-t border-white/5">
-          {user && (
-            <div className="flex items-center gap-2.5 px-3 py-2 bg-[#121215] border border-white/5 rounded-xl text-xs font-mono text-slate-300">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0" />
-              <span className="truncate">@{user.login}</span>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* MOBILE HEADER */}
-      <header className="md:hidden sticky top-0 z-40 bg-[#0E0E10]/90 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between w-full">
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-lg shadow flex items-center justify-center">
+      {/* TOP HEADER */}
+      <header className="shrink-0 h-14 bg-[#0B0B0E]/90 backdrop-blur-xl border-b border-white/5 px-4 sm:px-6 flex items-center justify-between z-30">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-xl shadow-lg shadow-indigo-500/15 flex items-center justify-center">
             <FolderGit className="w-4 h-4 text-white" />
           </div>
-          <span className="text-sm font-extrabold text-white">RepostNow</span>
+          <div className="text-left flex items-center gap-2">
+            <h1 className="text-sm font-extrabold text-white tracking-tight font-sans">RepostNow Code Studio</h1>
+            <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-mono px-2 py-0.5 rounded-full">v5.0</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex items-center gap-3">
+          {/* AI Status */}
+          <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[11px] font-mono text-emerald-400">
+            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+            <span>AI Online</span>
+          </div>
+
+          {user && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-[#121215] border border-white/5 rounded-full text-xs font-mono text-slate-300">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full flex-shrink-0" />
+              <span className="truncate max-w-[120px]">@{user.login}</span>
+            </div>
+          )}
+
           <button
             onClick={() => setActiveTab('settings')}
-            className={`p-1.5 rounded-lg border transition ${activeTab === 'settings' ? 'text-indigo-400 border-indigo-500/25 bg-indigo-500/10' : 'text-slate-400 hover:text-white bg-white/5 border-white/5'}`}
+            className={`p-2 rounded-xl border transition ${activeTab === 'settings' ? 'text-indigo-400 border-indigo-500/25 bg-indigo-500/10' : 'text-slate-400 hover:text-white bg-white/5 border-white/5'}`}
             title="Open settings"
           >
             <Sliders className="w-4 h-4" />
@@ -460,8 +414,8 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
       </header>
 
       {/* MAIN CONTAINER */}
-      <div className="flex-grow flex flex-col min-h-screen min-w-0 z-10 pb-20 md:pb-0">
-        <main className="flex-grow p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+      <div className="flex-1 overflow-y-auto min-h-0 z-10 flex flex-col">
+        <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto flex flex-col min-h-0">
           <AnimatePresence mode="wait">
             {session.status !== 'idle' ? (
               <motion.div
@@ -469,7 +423,7 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.98 }}
-                className="max-w-2xl mx-auto py-10"
+                className="max-w-2xl mx-auto py-10 my-auto w-full"
               >
                 <UploadProgressPanel
                   session={session}
@@ -480,7 +434,7 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                 />
               </motion.div>
             ) : (
-              <div className="h-full">
+              <div className="h-full flex flex-col flex-1 min-h-0">
                 {/* 1. DASHBOARD VIEW */}
                 {activeTab === 'dashboard' && (
                   <motion.div
@@ -488,7 +442,7 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -15 }}
-                    className="grid grid-cols-1 lg:grid-cols-12 gap-6"
+                    className="grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto"
                   >
                     {/* Left Column: Accounts & Repo Configuration */}
                     <div className="lg:col-span-5 space-y-6">
@@ -519,7 +473,7 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                         <div className="bg-[#141417]/40 border border-white/5 rounded-2xl p-8 text-center text-slate-500 border-dashed">
                           <Github className="w-8 h-8 mx-auto mb-3 opacity-30 text-indigo-400" />
                           <p className="text-xs leading-normal">
-                            Please connect your GitHub account using your Personal Access Token, or open the settings sidebar to authenticate via secure popup integration.
+                            Please connect your GitHub account using your Personal Access Token, or open the settings tab to configure credentials securely.
                           </p>
                         </div>
                       )}
@@ -586,7 +540,7 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -15 }}
-                    className="h-[82vh] md:h-[86vh] flex flex-col shadow-2xl"
+                    className="h-full flex flex-col flex-1 min-h-0 shadow-2xl overflow-hidden"
                   >
                     <AiAssistantPanel
                       stagedFiles={files}
@@ -618,7 +572,7 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -15 }}
-                    className="h-[82vh] md:h-[86vh] flex flex-col"
+                    className="h-full flex flex-col flex-1 min-h-0 overflow-hidden"
                   >
                     <SettingsPanel
                       isOpen={true}
@@ -643,45 +597,56 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
             )}
           </AnimatePresence>
         </main>
-
-        {/* Global Desktop Footer */}
-        <footer className="hidden md:block py-6 text-center text-slate-600 text-xs border-t border-white/5 bg-[#08080A]">
-          <p>© 2026 RepostNow. Direct Browser GitHub Pipeline. No logs. No trackers.</p>
-        </footer>
       </div>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0E0E10]/90 backdrop-blur-md border-t border-white/5 px-4 py-2 flex items-center justify-around shadow-2xl">
+      {/* FULL-WIDTH MOBILE-COMPATIBLE BOTTOM NAVIGATION BAR */}
+      <nav className="shrink-0 h-16 sm:h-18 bg-[#09090C]/95 backdrop-blur-2xl border-t border-white/10 px-2 sm:px-8 flex items-center justify-around sm:justify-center gap-1 sm:gap-10 z-40 shadow-2xl">
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'dashboard' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-3 sm:px-5 rounded-xl transition select-none cursor-pointer ${
+            activeTab === 'dashboard'
+              ? 'text-indigo-400 font-bold bg-indigo-500/15 border border-indigo-500/30 shadow-lg shadow-indigo-500/10'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+          }`}
         >
-          <LayoutGrid className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-mono">Home</span>
+          <LayoutGrid className="w-5 h-5 mb-0.5" />
+          <span className="text-[10px] sm:text-xs font-mono font-bold tracking-tight">Workspace</span>
         </button>
 
         <button
           onClick={() => setActiveTab('ai')}
-          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'ai' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-3 sm:px-5 rounded-xl transition select-none cursor-pointer ${
+            activeTab === 'ai'
+              ? 'text-indigo-400 font-bold bg-indigo-500/15 border border-indigo-500/30 shadow-lg shadow-indigo-500/10'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+          }`}
         >
-          <Sparkles className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-mono">AI Code</span>
+          <Sparkles className="w-5 h-5 mb-0.5" />
+          <span className="text-[10px] sm:text-xs font-mono font-bold tracking-tight">AI Studio</span>
         </button>
 
         <button
           onClick={() => setActiveTab('stats')}
-          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'stats' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-3 sm:px-5 rounded-xl transition select-none cursor-pointer ${
+            activeTab === 'stats'
+              ? 'text-indigo-400 font-bold bg-indigo-500/15 border border-indigo-500/30 shadow-lg shadow-indigo-500/10'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+          }`}
         >
-          <TrendingUp className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-mono">Stats</span>
+          <TrendingUp className="w-5 h-5 mb-0.5" />
+          <span className="text-[10px] sm:text-xs font-mono font-bold tracking-tight">Stats & Vercel</span>
         </button>
 
         <button
           onClick={() => setActiveTab('settings')}
-          className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition ${activeTab === 'settings' ? 'text-indigo-400 font-bold bg-indigo-500/10' : 'text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-3 sm:px-5 rounded-xl transition select-none cursor-pointer ${
+            activeTab === 'settings'
+              ? 'text-indigo-400 font-bold bg-indigo-500/15 border border-indigo-500/30 shadow-lg shadow-indigo-500/10'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+          }`}
         >
-          <Sliders className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-mono">Settings</span>
+          <Sliders className="w-5 h-5 mb-0.5" />
+          <span className="text-[10px] sm:text-xs font-mono font-bold tracking-tight">Settings</span>
         </button>
       </nav>
     </div>
