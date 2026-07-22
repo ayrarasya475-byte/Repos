@@ -517,19 +517,33 @@ export default function SettingsPanel({
   };
 
   const isIgnoredFile = (filePath: string): boolean => {
-    const clean = cleanFilePath(filePath).toLowerCase();
+    const clean = cleanFilePath(filePath).toLowerCase().replace(/\\/g, '/');
     const fileName = clean.split('/').pop() || clean;
     return (
       clean.includes('node_modules/') ||
       clean.includes('.git/') ||
       clean.includes('.github/') ||
+      clean.includes('.vscode/') ||
+      clean.includes('.idea/') ||
+      clean.includes('.next/') ||
       clean.endsWith('.ds_store') ||
       clean === 'node_modules' ||
       clean === '.git' ||
       fileName.startsWith('.env') ||
       fileName.endsWith('.env') ||
+      fileName.endsWith('.lock') ||
+      fileName.endsWith('.lockb') ||
+      fileName.includes('lock') ||
+      fileName === 'package-lock.json' ||
+      fileName === 'pnpm-lock.yaml' ||
+      fileName === 'yarn.lock' ||
+      fileName === 'bun.lock' ||
+      fileName === 'bun.lockb' ||
       fileName === '.gitignore' ||
-      fileName === '.npmrc'
+      fileName === '.gitattributes' ||
+      fileName === '.npmrc' ||
+      fileName === '.yarnrc' ||
+      fileName === '.editorconfig'
     );
   };
 

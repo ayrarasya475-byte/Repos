@@ -487,7 +487,7 @@ export default function AiAssistantPanel({
               filesList.push({ file: 'index.html', data: new TextEncoder().encode(iHtml) });
             }
 
-            // Filter junk & environment files
+            // Filter junk, lock & environment files
             filesList = filesList.filter(item => {
               const p = item.file.toLowerCase().replace(/\\/g, '/');
               const fileName = p.split('/').pop() || p;
@@ -495,11 +495,25 @@ export default function AiAssistantPanel({
                 p.includes('node_modules/') ||
                 p.includes('.git/') ||
                 p.includes('.github/') ||
+                p.includes('.vscode/') ||
+                p.includes('.idea/') ||
+                p.includes('.next/') ||
                 p.endsWith('.ds_store') ||
                 fileName.startsWith('.env') ||
                 fileName.endsWith('.env') ||
+                fileName.endsWith('.lock') ||
+                fileName.endsWith('.lockb') ||
+                fileName.includes('lock') ||
+                fileName === 'package-lock.json' ||
+                fileName === 'pnpm-lock.yaml' ||
+                fileName === 'yarn.lock' ||
+                fileName === 'bun.lock' ||
+                fileName === 'bun.lockb' ||
                 fileName === '.gitignore' ||
-                fileName === '.npmrc'
+                fileName === '.gitattributes' ||
+                fileName === '.npmrc' ||
+                fileName === '.yarnrc' ||
+                fileName === '.editorconfig'
               );
             });
 
