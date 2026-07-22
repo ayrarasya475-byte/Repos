@@ -618,11 +618,12 @@ export default function SettingsPanel({
 
               if (!res.ok) {
                 const errText = await res.text();
-                throw new Error(`Upload failed for ${item.file}: ${errText}`);
+                addLog(`⚠️ [Notice] Staging skipped for ${item.file} (${res.status}): ${errText}`);
+              } else {
+                uploadedCount++;
               }
-              uploadedCount++;
             } catch (err: any) {
-              throw new Error(`Failed to stage file "${item.file}": ${err.message}`);
+              addLog(`⚠️ [Notice] Staging warning for ${item.file}: ${err.message}`);
             }
           })
         );

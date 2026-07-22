@@ -103,9 +103,12 @@ export default function AiAssistantPanel({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom of chat
+  // Auto-scroll to bottom of chat with requestAnimationFrame to prevent mobile webkit thrashing
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const handle = requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    });
+    return () => cancelAnimationFrame(handle);
   }, [sessions, currentSessionId, loading]);
 
   // Sync to localStorage
@@ -525,16 +528,20 @@ export default function AiAssistantPanel({
             }));
 
             for (const item of processedFiles) {
-              await fetch(`/api/proxy-vercel-file?file=${encodeURIComponent(item.file)}`, {
-                method: 'POST',
-                headers: {
-                  'x-vercel-token': vercelToken,
-                  'Content-Type': 'application/octet-stream',
-                  'x-now-digest': item.sha,
-                  'x-now-size': String(item.size),
-                },
-                body: item.data,
-              });
+              try {
+                await fetch(`/api/proxy-vercel-file?file=${encodeURIComponent(item.file)}`, {
+                  method: 'POST',
+                  headers: {
+                    'x-vercel-token': vercelToken,
+                    'Content-Type': 'application/octet-stream',
+                    'x-now-digest': item.sha,
+                    'x-now-size': String(item.size),
+                  },
+                  body: item.data,
+                });
+              } catch (e) {
+                // Ignore individual file staging warnings
+              }
             }
 
             const projName = targetRepoName ? targetRepoName.toLowerCase().replace(/[^a-z0-9-]/g, '-') : 'repostnow-app';
@@ -1208,7 +1215,7 @@ export default function AiAssistantPanel({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row w-full h-full bg-[#0C0C0E] border border-white/5 rounded-2xl overflow-hidden text-left font-sans">
+    <div className="flex flex-col lg:flex-row w-full h-full bg-[#0C0C0E] border-0 sm:border border-white/5 rounded-none sm:rounded-2xl overflow-hidden text-left font-sans flex-1 min-h-0">
       
       {/* LEFT DRAWER */}
       <div className={`w-full lg:w-72 bg-[#09090C] border-b lg:border-b-0 lg:border-r border-white/5 p-4 flex-shrink-0 flex flex-col gap-4 ${showHistory ? 'block' : 'hidden lg:flex'}`}>

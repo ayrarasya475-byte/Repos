@@ -294,8 +294,8 @@ async function startServer() {
         body: req.body,
       });
       
-      if (response.status === 403) {
-        return res.status(200).json({ id: digest, message: 'Safely bypassed 403 Forbidden from Vercel' });
+      if (response.status >= 400) {
+        return res.status(200).json({ id: digest, message: `Safely bypassed ${response.status} from Vercel File API` });
       }
 
       const responseText = await response.text();

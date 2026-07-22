@@ -414,8 +414,10 @@ _Generated automatically with [RepostNow](https://repostnow.dev) - Direct-to-Git
       </header>
 
       {/* MAIN CONTAINER */}
-      <div className="flex-1 overflow-y-auto min-h-0 z-10 flex flex-col">
-        <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto flex flex-col min-h-0">
+      <div className={`flex-1 min-h-0 z-10 flex flex-col ${activeTab === 'ai' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <main className={`flex-1 w-full mx-auto flex flex-col min-h-0 ${
+          activeTab === 'ai' ? 'p-0 max-w-none h-full' : 'p-4 sm:p-6 max-w-7xl'
+        }`}>
           <AnimatePresence mode="wait">
             {session.status !== 'idle' ? (
               <motion.div
