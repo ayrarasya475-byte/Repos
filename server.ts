@@ -221,6 +221,22 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing required headers: x-vercel-token, x-now-digest, x-now-size' });
     }
 
+    // Auto-ignore environment files (.env*) and sensitive system dotfiles to avoid 403 Forbidden from Vercel
+    const cleanLower = fileName.toLowerCase().replace(/\\/g, '/');
+    const baseName = cleanLower.split('/').pop() || cleanLower;
+    if (
+      baseName.startsWith('.env') ||
+      baseName.endsWith('.env') ||
+      cleanLower.includes('node_modules/') ||
+      cleanLower.includes('.git/') ||
+      cleanLower.includes('.github/') ||
+      baseName === '.ds_store' ||
+      baseName === '.gitignore' ||
+      baseName === '.npmrc'
+    ) {
+      return res.status(200).json({ id: digest, message: 'Safely ignored sensitive or environment file' });
+    }
+
     // MIME type content verification
     const bodyBuffer = req.body as Buffer;
     if (bodyBuffer && bodyBuffer.length > 0) {

@@ -518,13 +518,18 @@ export default function SettingsPanel({
 
   const isIgnoredFile = (filePath: string): boolean => {
     const clean = cleanFilePath(filePath).toLowerCase();
+    const fileName = clean.split('/').pop() || clean;
     return (
       clean.includes('node_modules/') ||
       clean.includes('.git/') ||
       clean.includes('.github/') ||
       clean.endsWith('.ds_store') ||
       clean === 'node_modules' ||
-      clean === '.git'
+      clean === '.git' ||
+      fileName.startsWith('.env') ||
+      fileName.endsWith('.env') ||
+      fileName === '.gitignore' ||
+      fileName === '.npmrc'
     );
   };
 
@@ -815,15 +820,7 @@ export default function SettingsPanel({
     }
 
     // 3. Auto-filter junk files
-    finalFiles = finalFiles.filter(item => {
-      const path = cleanFilePath(item.file).toLowerCase();
-      return !(
-        path.includes('node_modules/') ||
-        path.includes('.git/') ||
-        path.includes('.github/') ||
-        path.endsWith('.ds_store')
-      );
-    });
+    finalFiles = finalFiles.filter(item => !isIgnoredFile(item.file));
 
     await executeVercelDeployment(finalFiles);
   };

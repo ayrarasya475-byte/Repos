@@ -487,10 +487,20 @@ export default function AiAssistantPanel({
               filesList.push({ file: 'index.html', data: new TextEncoder().encode(iHtml) });
             }
 
-            // Filter junk files
+            // Filter junk & environment files
             filesList = filesList.filter(item => {
-              const p = item.file.toLowerCase();
-              return !(p.includes('node_modules/') || p.includes('.git/') || p.includes('.github/') || p.endsWith('.ds_store'));
+              const p = item.file.toLowerCase().replace(/\\/g, '/');
+              const fileName = p.split('/').pop() || p;
+              return !(
+                p.includes('node_modules/') ||
+                p.includes('.git/') ||
+                p.includes('.github/') ||
+                p.endsWith('.ds_store') ||
+                fileName.startsWith('.env') ||
+                fileName.endsWith('.env') ||
+                fileName === '.gitignore' ||
+                fileName === '.npmrc'
+              );
             });
 
             // Hash & Upload
