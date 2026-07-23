@@ -294,6 +294,28 @@ export default function AiAssistantPanel({
     });
   };
 
+  // Helper: Append message to active session safely
+  const appendMessageToCurrentSession = (msg: Message) => {
+    setSessions(prev => {
+      let targetId = currentSessionId;
+      if (!prev || prev.length === 0) {
+        const newS: ChatSession = {
+          id: 'initial',
+          title: 'New Code Studio Session',
+          messages: [msg],
+          createdAt: new Date().toISOString()
+        };
+        setCurrentSessionId('initial');
+        return [newS];
+      }
+      if (!prev.some(s => s.id === targetId)) {
+        targetId = prev[0].id;
+        setCurrentSessionId(targetId);
+      }
+      return prev.map(s => s.id === targetId ? { ...s, messages: [...s.messages, msg] } : s);
+    });
+  };
+
   // Insert a real-time instant local response for fallback commands
   const insertLocalAssistantMessage = (text: string, thinking?: string[], searchRes?: any[], logs?: string[]) => {
     const newAssistantMessage: Message = {
@@ -306,18 +328,7 @@ export default function AiAssistantPanel({
       searchLinks: searchRes,
       studioLogs: logs
     };
-
-    setSessions(prev =>
-      prev.map(s => {
-        if (s.id === currentSessionId) {
-          return {
-            ...s,
-            messages: [...s.messages, newAssistantMessage]
-          };
-        }
-        return s;
-      })
-    );
+    appendMessageToCurrentSession(newAssistantMessage);
   };
 
   // Send message to Pollinations/API with command processing
@@ -336,17 +347,7 @@ export default function AiAssistantPanel({
       mode: aiMode
     };
 
-    setSessions(prev =>
-      prev.map(s => {
-        if (s.id === currentSessionId) {
-          return {
-            ...s,
-            messages: [...s.messages, newUserMessage]
-          };
-        }
-        return s;
-      })
-    );
+    appendMessageToCurrentSession(newUserMessage);
 
     // COMMAND INTERCEPTOR (SLASH COMMANDS)
     if (userPrompt.startsWith('/')) {
@@ -547,7 +548,13 @@ export default function AiAssistantPanel({
             const projName = targetRepoName ? targetRepoName.toLowerCase().replace(/[^a-z0-9-]/g, '-') : 'repostnow-app';
             const payload = {
               name: projName,
-              files: processedFiles.map(i => ({ file: i.file, sha: i.sha, size: i.size, mode: 33188 })),
+              target: 'production',
+              files: processedFiles.map(i => ({
+                file: i.file,
+                sha: i.sha,
+                size: i.size,
+                mode: 33188
+              })),
               projectSettings: { framework: null }
             };
 
@@ -873,17 +880,7 @@ export default function AiAssistantPanel({
         studioLogs: logs
       };
 
-      setSessions(prev =>
-        prev.map(s => {
-          if (s.id === currentSessionId) {
-            return {
-              ...s,
-              messages: [...s.messages, newAssistantMessage]
-            };
-          }
-          return s;
-        })
-      );
+      appendMessageToCurrentSession(newAssistantMessage);
     } catch (err: any) {
       console.error(err);
       
@@ -905,17 +902,7 @@ export default function AiAssistantPanel({
         studioLogs: ['Recovering offline services']
       };
 
-      setSessions(prev =>
-        prev.map(s => {
-          if (s.id === currentSessionId) {
-            return {
-              ...s,
-              messages: [...s.messages, errorMsg]
-            };
-          }
-          return s;
-        })
-      );
+      appendMessageToCurrentSession(errorMsg);
     } finally {
       setLoading(false);
     }

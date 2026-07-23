@@ -33,6 +33,7 @@ export interface GitHubRepo {
   description: string | null;
   default_branch: string;
   language?: string | null;
+  open_issues_count?: number;
   owner?: {
     login: string;
   };
